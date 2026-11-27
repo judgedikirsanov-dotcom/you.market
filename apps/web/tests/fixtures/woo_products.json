@@ -1,0 +1,6 @@
+[
+  {"id":111,"name":"Slider Revolution 6 Pro","prices":{"price":"9900","currency_code":"USD"},"permalink":"https://woocommerce.com/products/slider-revolution/","is_in_stock":true,"images":["https://woocommerce.com/wp-content/uploads/slider.png"]},
+  {"id":112,"name":"Slider Revolution Pro — License Extension","prices":{"price":"4900","currency_code":"USD"},"permalink":"https://woocommerce.com/products/slider-revolution-extension/","is_in_stock":true,"images":[]},
+  {"id":113,"name":"Payment Gateway Sample","prices":{"price":"0","currency_code":"USD"},"permalink":"https://woocommerce.com/products/sample/","is_in_stock":false,"images":[]},
+  {"id":114,"name":"Slider Revolution Template Pack: Food & Recipes","prices":{"price":"3900","currency_code":"USD"},"permalink":"https://woocommerce.com/products/slider-templates-food/","is_in_stock":true,"images":[]}
+]

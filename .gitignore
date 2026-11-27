@@ -1,0 +1,18 @@
+# секреты — никогда не попадают в репозиторий
+.env
+.env.*
+*.pem
+*.key
+.hf_token
+hf_token*
+*_token*.txt
+
+# зависимости и сборка
+node_modules/
+dist/
+.wrangler/
+
+# служебное
+.DS_Store
+Thumbs.db
+*.log

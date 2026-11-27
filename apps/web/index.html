@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>честный поиск товаров — введи запрос, остальное сделаю сам</title>
+<meta name="description" content="Открывает вкладки поисковиков с твоим запросом, принимает выдачу (с ИИ-ответами) от кнопки-закладки, закрывает вкладки и собирает отфильтрованный итог с медианой рынка. Всё от твоего лица, без прокси и серверов.">
+<style>
+  :root { --bg:#0f1216; --card:#181d24; --line:#2a313b; --tx:#e8ecf1; --dim:#9aa7b4; --ok:#4fbf7c; --warn:#e0a23c; --bad:#e06060; --acc:#57b3e0; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin:0; background:var(--bg); color:var(--tx); font:16px/1.55 -apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: clamp(16px,4vw,40px); }
+  h1 { font-size: clamp(1.4rem, 4.6vw, 2.1rem); margin: 0 0 6px; }
+  .sub { color: var(--dim); font-size: clamp(.85rem, 2.5vw, .95rem); margin-bottom: 18px; }
+  .privacy { border:1px solid var(--ok); border-radius:10px; padding:10px 14px; font-size:.85rem; color:var(--ok);
+             background:rgba(79,191,124,.06); margin:10px 0; }
+
+  /* ---- герой: только запрос ---- */
+  .searchbar { display:flex; gap:10px; flex-wrap:wrap; position:relative; }
+  .searchbar input { flex:1 1 240px; min-width:0; padding:13px 16px; border-radius:10px; border:1px solid var(--line);
+                     background:var(--card); color:var(--tx); font-size:1rem; }
+  .searchbar button { padding:13px 26px; border-radius:10px; border:0; background:var(--ok); color:#08130c;
+                      font-weight:600; font-size:1rem; cursor:pointer; }
+  .searchbar button.ghost { background:transparent; color:var(--dim); border:1px solid var(--line); font-weight:400; }
+  .searchbar button.ghost:hover { border-color:var(--acc); color:var(--acc); }
+  .sugg { position:absolute; top:100%; left:0; right:0; background:var(--card); border:1px solid var(--line);
+          border-radius:0 0 10px 10px; z-index:30; margin-top:2px; }
+  .sugg-item { padding: 9px 16px; cursor:pointer; font-size:.95rem; }
+  .sugg-item:hover { background: var(--bg); }
+
+  /* ---- курьер-подсказка ---- */
+  .courier { border:1px solid var(--acc); border-radius:10px; padding:10px 14px; font-size:.9rem; color:var(--acc);
+             background:rgba(87,179,224,.06); margin:12px 0; }
+  .courier kbd { font-family: inherit; background:var(--card); border:1px solid var(--line); border-bottom-width:2px;
+                 border-radius:5px; padding: 1px 7px; font-size: .85em; }
+  .courier:empty { display:none; }
+
+  /* ---- чипы источников ---- */
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
+  .chip { font-size:.78rem; padding:4px 11px; border-radius:99px; border:1px solid var(--line); color:var(--dim);
+          background:transparent; }
+  .chip.wait { color:var(--acc); border-color:var(--acc); animation:pulse 1.3s infinite; }
+  .chip.ok { color:var(--ok); border-color:var(--ok); }
+  .chip.bad { color:var(--bad); border-color:var(--bad); }
+  button.chip { cursor:pointer; }
+  button.chip:hover { border-color:var(--acc); color:var(--acc); }
+  .chips:empty { display:none; }
+
+  /* ---- установка кнопки-закладки (букмарклета) ---- */
+  .bm-setup { border:1px solid var(--line); border-radius:12px; background:var(--card); padding:16px; margin:14px 0; }
+  .bm-setup h3 { margin:0 0 8px; font-size:1rem; }
+  .bm-setup ol { margin:8px 0 12px 20px; padding:0; font-size:.9rem; }
+  .bm-setup li { margin:4px 0; }
+  .bm-setup kbd { font-family: inherit; background: var(--bg); border:1px solid var(--line); border-bottom-width:2px;
+                  border-radius:5px; padding: 1px 6px; font-size: .9em; }
+  .bm-btn { display:inline-block; background:var(--ok); color:#08130c; font-weight:700; font-size:1rem;
+            padding:10px 18px; border-radius:10px; text-decoration:none; cursor:grab;
+            border:2px dashed rgba(255,255,255,.35); user-select:none; }
+  .bm-btn:hover { filter:brightness(1.1); }
+  .bm-note { color:var(--dim); font-size:.82rem; margin-top:8px; }
+  .bm-note a { color: var(--acc); }
+
+  /* ---- зона вставки (резервный канал) ---- */
+  .dropzone { border:2px dashed var(--line); border-radius:14px; padding: clamp(14px,4vw,22px) 16px; text-align:center;
+              margin: 12px 0; transition: border-color .2s, background .2s; }
+  .dropzone.drag { border-color: var(--acc); background: rgba(87,179,224,.06); }
+  .dropzone .small { color: var(--dim); font-size: .85rem; }
+  .dropzone kbd { font-family: inherit; background: var(--card); border:1px solid var(--line); border-bottom-width:2px;
+                  border-radius:5px; padding: 1px 7px; font-size: .85em; }
+  .dropzone .linklike, label.linklike { color: var(--acc); cursor: pointer; border-bottom: 1px dotted var(--acc); }
+  .grabrow { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; margin-top:12px; }
+  .grabrow button { padding:10px 18px; border-radius:10px; border:1px solid var(--acc); background:rgba(87,179,224,.08);
+                    color:var(--acc); cursor:pointer; font-size:.9rem; }
+  .grabrow button:hover { background:rgba(87,179,224,.18); }
+  .grabrow .small { color: var(--dim); font-size:.8rem; }
+
+  /* ---- лента стадий ①-⑥ ---- */
+  .prog { display:flex; flex-direction:column; gap:8px; margin:6px 0 16px; }
+  .stage { display:flex; align-items:flex-start; gap:10px; padding:8px 12px; border:1px solid var(--line);
+           border-radius:10px; background:var(--card); flex-wrap:wrap; }
+  .stage .num { flex:0 0 auto; width:26px; height:26px; border-radius:50%; border:1px solid var(--line);
+                display:flex; align-items:center; justify-content:center; font-size:.9rem; color:var(--dim); }
+  .stage .lbl { flex:0 0 auto; max-width: 260px; color:var(--dim); font-size:.9rem; padding-top:3px; }
+  .stage .det { flex:1 1 220px; min-width:0; font-size:.85rem; color:var(--dim); padding-top:3px; word-break:break-word; }
+  .stage .det:empty { display:none; }
+  .stage.active { border-color:var(--acc); }
+  .stage.active .num { border-color:var(--acc); color:var(--acc); animation:pulse 1.2s infinite; }
+  .stage.active .lbl { color:var(--acc); }
+  .stage.done { border-color:var(--ok); }
+  .stage.done .num { border-color:var(--ok); color:var(--ok); }
+  .stage.done .lbl { color:var(--ok); }
+  .stage.skip { opacity:.45; }
+  .stage.error { border-color:var(--bad); }
+  .stage.error .num { border-color:var(--bad); color:var(--bad); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .evline { padding:2px 0; word-break: break-word; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+
+  .stats { display:flex; gap:14px; flex-wrap:wrap; font-size:.9rem; color:var(--dim); margin:14px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .card.ai-card { border-color:#6a5cd0; background:rgba(106,92,208,.08); }
+  .aitext { font-size:.92rem; white-space:pre-wrap; word-break:break-word; margin:6px 0; }
+  .card a.t { color:var(--tx); font-weight:600; text-decoration:none; font-size:1.02rem; }
+  .card a.t:hover { color:var(--ok); }
+  .shop { color: var(--acc); font-size:.8rem; margin-bottom:4px; }
+  .ai-card .shop { color:#a89ef0; }
+  .price { font-size:1.3rem; font-weight:700; margin:6px 0 4px; }
+  .meta { color:var(--dim); font-size:.85rem; }
+  .badges { margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; }
+  .b { font-size:.75rem; padding:3px 9px; border-radius:99px; border:1px solid var(--line); color:var(--dim); }
+  .b.ok { color:var(--ok); border-color:var(--ok); }
+  .b.warn { color:var(--warn); border-color:var(--warn); }
+
+  /* ---- итог в стиле каталогов (ecatalog): товар слева, цены справа ---- */
+  .card.ec { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+  .ec-name { flex:1 1 320px; min-width:0; }
+  .ec-name .t { font-size:1.05rem; font-weight:600; color:var(--tx); text-decoration:none; word-break:break-word; }
+  .ec-name .t:hover { color:var(--ok); }
+  .ec-meta { color:var(--dim); font-size:.8rem; margin-top:4px; }
+  .ec-srcs { flex:0 0 auto; display:flex; flex-direction:column; gap:6px; max-width:46%; min-width:210px; }
+  .ec-src { display:flex; align-items:baseline; gap:8px; padding:6px 10px; border:1px solid var(--line);
+            border-radius:8px; color:var(--tx); text-decoration:none; font-size:.88rem; }
+  .ec-src:hover { border-color:var(--acc); }
+  .ec-shop { color:var(--acc); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%; }
+  .ec-price { color:var(--tx); font-weight:700; white-space:nowrap; margin-left:auto; }
+  .ec-price.dim { color:var(--dim); font-weight:400; }
+  .ec-tag { color:var(--ok); font-size:.72rem; white-space:nowrap; }
+  .ec-tag.dim { color:var(--dim); }
+  /* v14: картинка товара в карточке (из выдачи) + плейсхолдер и свёрнутые
+     «менее похожие» */
+  .ec-th { flex:0 0 auto; width:96px; height:96px; object-fit:cover; object-position:center;
+           border-radius:10px; border:1px solid var(--line); background:#11151b; }
+  .ec-th.ph { display:flex; align-items:center; justify-content:center; font-size:2rem;
+              font-weight:700; color:var(--acc); }
+  .restbox { margin-top:10px; color:var(--dim); font-size:.85rem; }
+  .restbox summary { cursor:pointer; padding:6px 4px; color:var(--acc); }
+  .restbox .card.ec { margin-top:8px; opacity:.88; }
+  @media (max-width:640px){ .card.ec { flex-direction:column; } .ec-srcs { max-width:100%; width:100%; } }
+  details { margin: 16px 0; }
+  summary { cursor:pointer; color:var(--dim); }
+  .hid { padding:10px 14px; border-left:3px solid var(--bad); margin:8px 0; background:var(--card); border-radius:0 8px 8px 0; font-size:.88rem; }
+  .hid .r { color:var(--bad); }
+  .fatal { border:1px solid var(--bad); border-radius:10px; padding:14px 16px; font-size:.9rem; color:var(--bad);
+           background:rgba(224,96,96,.06); margin:12px 0; }
+  .log { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:10px 14px; margin:12px 0;
+         max-height:180px; overflow-y:auto; font-size:.82rem; color:var(--dim); }
+  .logline .t { color: var(--line); margin-right:8px; }
+  .logline.bad { color: var(--bad); } .logline.warn { color: var(--warn); }
+  .howto { border:1px solid var(--line); border-radius:12px; background:var(--card); padding:16px; margin:18px 0; font-size:.9rem; }
+  .howto ol { margin:8px 0 0 20px; padding:0; }
+  .howto li { margin:4px 0; }
+  .howto kbd { font-family: inherit; background: var(--bg); border:1px solid var(--line); border-bottom-width:2px;
+               border-radius:5px; padding: 1px 6px; font-size: .9em; }
+  .howto a { color: var(--acc); }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin: 12px 0; }
+  .toolbar button { padding:9px 18px; border-radius:10px; border:1px solid var(--line); background:var(--card);
+                    color:var(--dim); cursor:pointer; font-size:.9rem; }
+  .toolbar button:hover { border-color:var(--acc); color:var(--acc); }
+  .manual { margin-top:8px; }
+  .manual button { background:transparent; color:var(--dim); border:1px solid var(--line); padding:8px 16px;
+                   border-radius:10px; cursor:pointer; font-size:.85rem; }
+  .manual button:hover { border-color:var(--warn); color:var(--warn); }
+  footer { color:var(--dim); font-size:.8rem; margin-top:30px; }
+
+  .bridge-ind { border:1px solid var(--acc); border-radius:10px; padding:10px 14px; font-size:.85rem;
+                color:var(--acc); background:rgba(78,140,255,.07); margin:12px 0; }
+
+  /* ---- окно-анимация (#fsWorker): перекрывает стопку окон поиска ---- */
+  body.worker-mode > main { display: none; }
+  #workerDash { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+                justify-content: center; gap: 18px; text-align: center; padding: 24px;
+                background: radial-gradient(120% 120% at 50% 0%, #16202b 0%, #0f1216 65%); z-index: 100; }
+  #workerDash[hidden] { display: none; }
+  .wq { font-size: clamp(1.1rem, 3.2vw, 1.5rem); color: var(--tx); max-width: 640px; word-break: break-word; }
+  .wmag { font-size: clamp(3rem, 9vw, 4.6rem); position: relative; line-height: 1;
+          animation: wobble 2.4s ease-in-out infinite; }
+  .wmag::before, .wmag::after { content: ""; position: absolute; inset: -26px;
+          border: 2px solid rgba(87,179,224,.35); border-radius: 50%;
+          animation: ring 2.2s ease-out infinite; }
+  .wmag::after { animation-delay: 1.1s; }
+  .wdone { display: none; font-size: clamp(2.4rem, 7vw, 3.6rem); color: var(--ok); line-height: 1;
+           animation: pop .5s ease; }
+  .wdone.show { display: block; }
+  .wchips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 660px; }
+  .wchip { font-size: .85rem; padding: 6px 14px; border-radius: 99px; border: 1px solid var(--line);
+           color: var(--dim); transition: color .2s, border-color .2s; }
+  .wchip.on { color: var(--ok); border-color: var(--ok); }
+  .wstate { color: var(--dim); font-size: .9rem; max-width: 640px; word-break: break-word; }
+  @keyframes ring { 0% { transform: scale(.55); opacity: .9; } 100% { transform: scale(1.55); opacity: 0; } }
+  @keyframes wobble { 0%,100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+  @keyframes pop { 0% { transform: scale(.3); opacity: 0; } 70% { transform: scale(1.15); }
+                   100% { transform: scale(1); opacity: 1; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>честный поиск товаров</h1>
+  <div class="sub">жмёшь «искать» — я открываю окна поисковиков <b>с твоим запросом</b> (Google, Яндекс, Bing, DuckDuckGo)
+       каскадом, друг под другом, и поверх — <b>окно поиска с живым прогрессом</b>. Выдача <b>вместе с ИИ-ответом</b>
+       прилетает с твоих окон, они закрываются сами, и ты остаёшься на моей странице с отфильтрованными карточками
+       и медианой рынка. Всё выполняется от твоего лица: твой браузер, твой IP, твои куки — поисковик видит обычного тебя.</div>
+  <div class="privacy">🔒 приватно: страница — статический HTML без серверов, прокси и логов. Запросы к магазинам идут
+       с твоего IP (у них CORS открыт); выдача поисковиков попадает на страницу только из <b>твоих вкладок</b> —
+       через postMessage от кнопки-закладки или твой буфер обмена. Мы не конкуренты поисковикам — мы их
+       продвинутые пользователи, работаем от лица обычного человека.</div>
+  <div class="bridge-ind" id="bridgeInd" hidden></div>
+
+  <div class="bm-setup" id="bridgeOff">
+    <h3>⚙️ разовая настройка (1 минута) — чтобы окна сами приходили с выдачей</h3>
+    <ol>
+      <li><b>кнопка-закладка</b> — универсально, любой браузер (Firefox, Chrome, Safari…), без расширений:
+          <b>перетащи эту кнопку на панель закладок</b> (в Firefox: <kbd>Ctrl+Shift+B</kbd> — показать панель):<br>
+          <a id="bmLink" class="bm-btn" href="javascript:%2F%2F%20%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%0A%2F%2F%20bridge-lib.js%20%E2%80%94%20%D0%B5%D0%B4%D0%B8%D0%BD%D0%B0%D1%8F%20%D0%B1%D0%B8%D0%B1%D0%BB%D0%B8%D0%BE%D1%82%D0%B5%D0%BA%D0%B0%20%C2%AB%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82-%D0%BC%D0%BE%D1%81%D1%82%D0%B0%C2%BB%20%D1%87%D0%B5%D1%81%D1%82%D0%BD%D0%BE%D0%B3%D0%BE%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%B0%20%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2.%0A%2F%2F%0A%2F%2F%20%D0%A0%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82%20%D0%B2%20%D1%82%D1%80%D1%91%D1%85%20%D1%80%D0%BE%D0%BB%D1%8F%D1%85%20%D0%B8%D0%B7%20%D0%9E%D0%94%D0%9D%D0%9E%D0%93%D0%9E%20%D0%B8%D1%81%D1%85%D0%BE%D0%B4%D0%BD%D0%B8%D0%BA%D0%B0%20(%D0%B1%D0%B5%D0%B7%20%D1%80%D0%B0%D1%81%D0%BF%D0%BE%D0%BB%D0%B7%D0%B0%D0%BD%D0%B8%D1%8F%20%D0%BA%D0%BE%D0%BF%D0%B8%D0%B9)%3A%0A%2F%2F%20%20%20%E2%80%A2%20%D0%BD%D0%B0%20%D1%81%D0%B0%D0%B9%D1%82%D0%B5%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0%3A%20window.FSBridge%20%E2%80%94%20%D0%BF%D1%80%D0%B8%D1%91%D0%BC%2F%D0%B2%D0%B0%D0%BB%D0%B8%D0%B4%D0%B0%D1%86%D0%B8%D1%8F%20payload'%D0%BE%D0%B2%3B%0A%2F%2F%20%20%20%E2%80%A2%20%D0%B2%20%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D0%BA%D0%BE%D0%BC%20%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82%D0%B5%20(Violentmonkey%2FTampermonkey)%3A%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B0%D0%B5%D1%82%D1%81%D1%8F%0A%2F%2F%20%20%20%20%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20%40require%20%E2%80%94%20%D0%B0%D0%B2%D1%82%D0%BE-%D0%BE%D1%82%D1%87%D1%91%D1%82%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B8%20%2B%20%D0%BA%D0%BD%D0%BE%D0%BF%D0%BA%D0%B0%2FAlt%2BS%3B%0A%2F%2F%20%20%20%E2%80%A2%20%D0%B2%20%D0%B1%D1%83%D0%BA%D0%BC%D0%B0%D1%80%D0%BA%D0%BB%D0%B5%D1%82%D0%B5%3A%20%D1%86%D0%B5%D0%BB%D0%B8%D0%BA%D0%BE%D0%BC%20%D0%B8%D0%BD%D0%BB%D0%B0%D0%B9%D0%BD%D0%B8%D1%82%D1%81%D1%8F%20%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82%D0%BE%D0%BC%20build_bookmarklet.js%0A%2F%2F%20%20%20%20%20(CSP%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D1%8B%20%D0%B1%D1%83%D0%BA%D0%BC%D0%B0%D1%80%D0%BA%D0%BB%D0%B5%D1%82%20%D0%BD%D0%B5%20%D0%B7%D0%B0%D0%BF%D1%80%D0%B5%D1%89%D0%B0%D0%B5%D1%82%2C%20%D0%BD%D0%BE%20%D0%B2%D0%BD%D0%B5%D1%88%D0%BD%D0%B8%D0%B5%20%3Cscript%20src%3E%20%E2%80%94%20%D0%B4%D0%B0%2C%0A%2F%2F%20%20%20%20%20%D0%BF%D0%BE%D1%8D%D1%82%D0%BE%D0%BC%D1%83%20%D0%BA%D0%BE%D0%B4%20%D0%B1%D1%83%D0%BA%D0%BC%D0%B0%D1%80%D0%BA%D0%BB%D0%B5%D1%82%D0%B0%20%D1%81%D0%B0%D0%BC%D0%BE%D0%B4%D0%BE%D1%81%D1%82%D0%B0%D1%82%D0%BE%D1%87%D0%B5%D0%BD).%0A%2F%2F%0A%2F%2F%20%D0%A4%D0%B8%D0%BB%D0%BE%D1%81%D0%BE%D1%84%D0%B8%D1%8F%3A%20%D0%BC%D1%8B%20%D0%BD%D0%B5%20%D0%BA%D0%BE%D0%BD%D0%BA%D1%83%D1%80%D0%B5%D0%BD%D1%82%D1%8B%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%B0%D0%BC%2C%20%D0%BC%D1%8B%20%D0%B8%D1%85%20%D0%BF%D1%80%D0%BE%D0%B4%D0%B2%D0%B8%D0%BD%D1%83%D1%82%D1%8B%D0%B5%20%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D0%B8.%0A%2F%2F%20%D0%92%D1%81%D1%91%20%D0%B2%D1%8B%D0%BF%D0%BE%D0%BB%D0%BD%D1%8F%D0%B5%D1%82%D1%81%D1%8F%20%D0%92%20%D0%91%D0%A0%D0%90%D0%A3%D0%97%D0%95%D0%A0%D0%95%20%D0%9F%D0%9E%D0%9B%D0%AC%D0%97%D0%9E%D0%92%D0%90%D0%A2%D0%95%D0%9B%D0%AF%20%D0%BE%D1%82%20%D0%B5%D0%B3%D0%BE%20%D0%BB%D0%B8%D1%86%D0%B0%3A%20%D0%B5%D0%B3%D0%BE%20IP%2C%20%D0%B5%D0%B3%D0%BE%20%D0%BA%D1%83%D0%BA%D0%B8%2C%0A%2F%2F%20%D0%B5%D0%B3%D0%BE%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B8.%20%D0%9D%D0%B8%D0%BA%D0%B0%D0%BA%D0%B8%D1%85%20%D1%81%D0%B5%D1%80%D0%B2%D0%B5%D1%80%D0%BE%D0%B2%20%D0%B8%20%D0%BF%D1%80%D0%BE%D0%BA%D1%81%D0%B8.%20%D0%92%D1%8B%D0%B4%D0%B0%D1%87%D0%B0%20%D0%BF%D0%BE%D0%BF%D0%B0%D0%B4%D0%B0%D0%B5%D1%82%20%D0%BD%D0%B0%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D1%83%0A%2F%2F%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20window.opener.postMessage%20(%D0%B5%D0%B4%D0%B8%D0%BD%D1%81%D1%82%D0%B2%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%BB%D0%B5%D0%B3%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%20%D0%BC%D0%BE%D1%81%D1%82%0A%2F%2F%20%D0%BC%D0%B5%D0%B6%D0%B4%D1%83%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B0%D0%BC%D0%B8%20%D1%80%D0%B0%D0%B7%D0%BD%D1%8B%D1%85%20origin)%20%D0%B8%D0%BB%D0%B8%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20%D0%B1%D1%83%D1%84%D0%B5%D1%80%20%D0%BE%D0%B1%D0%BC%D0%B5%D0%BD%D0%B0%20%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8F.%0A%2F%2F%0A%2F%2F%20Payload%3A%20%7BfsBridge%3A1%2C%20v%3A2%2C%20src%2C%20q%2C%20ts%2C%20host%2C%20items%3A%5B%7Btitle%2Curl%2Csnippet%7D...%5D%2C%0A%2F%2F%20%20%20%20%20%20%20%20%20%20%20ai%3A%7Bsrc%2Ctext%7D%7Cnull%2C%20html%3F%3A%D1%81%D1%82%D1%80%D0%BE%D0%BA%D0%B0%20(%D1%82%D0%BE%D0%BB%D1%8C%D0%BA%D0%BE%20%D0%B5%D1%81%D0%BB%D0%B8%20%D0%BF%D0%B0%D1%80%D1%81%D0%B5%D1%80%20%D0%BD%D0%B5%20%D1%80%D0%B0%D1%81%D0%BF%D0%BE%D0%B7%D0%BD%D0%B0%D0%BB)%7D%0A%2F%2F%20%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%3D%0A(function(root)%7B%0A%22use%20strict%22%3B%0A%0A%2F%2F%20----------------------------------------------------------------------------%0A%2F%2F%20%D0%B1%D0%B0%D0%B7%D0%BE%D0%B2%D1%8B%D0%B9%20%D1%80%D0%B0%D0%B7%D0%B1%D0%BE%D1%80%20HTML%20(%D0%BB%D0%BE%D0%B3%D0%B8%D0%BA%D0%B0%201%3A1%20%D1%81%20core.js%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0)%0A%2F%2F%20----------------------------------------------------------------------------%0Afunction%20decodeEntities(s)%7B%0A%20%20return%20String(s)%0A%20%20%20%20.replace(%2F%26%23x(%5B0-9a-f%5D%2B)%3B%2Fgi%2C%20function(_%2C%20h)%7B%20return%20String.fromCharCode(parseInt(h%2C%2016))%3B%20%7D)%0A%20%20%20%20.replace(%2F%26%23(%5Cd%2B)%3B%2Fg%2C%20function(_%2C%20d)%7B%20return%20String.fromCharCode(%2Bd)%3B%20%7D)%0A%20%20%20%20.replace(%2F%26amp%3B%2Fg%2C%20%22%26%22).replace(%2F%26lt%3B%2Fg%2C%20%22%3C%22).replace(%2F%26gt%3B%2Fg%2C%20%22%3E%22)%0A%20%20%20%20.replace(%2F%26quot%3B%2Fg%2C%20'%22').replace(%2F%26%2339%3B%2Fg%2C%20%22'%22).replace(%2F%26nbsp%3B%2Fg%2C%20%22%20%22)%3B%0A%7D%0Afunction%20eachAnchor(html%2C%20cb)%7B%0A%20%20var%20re%20%3D%20%2F%3Ca%5Cb(%5B%5E%3E%5D*)%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fgi%2C%20m%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%20cb(m%5B1%5D%2C%20m%5B2%5D)%3B%0A%7D%0Afunction%20attrGet(attrs%2C%20name)%7B%0A%20%20var%20m%20%3D%20new%20RegExp(name%20%2B%20%22%5C%5Cs*%3D%5C%5Cs*(%5B%5C%22'%5D)(%5B%5C%5Cs%5C%5CS%5D*%3F)%5C%5C1%22%2C%20%22i%22).exec(attrs)%3B%0A%20%20return%20m%20%3F%20m%5B2%5D%20%3A%20%22%22%3B%0A%7D%0Afunction%20stripTags(s)%7B%0A%20%20return%20decodeEntities(String(s%20%7C%7C%20%22%22).replace(%2F%3Cscript%5B%5Cs%5CS%5D*%3F%3C%5C%2Fscript%3E%2Fgi%2C%20%22%20%22)%0A%20%20%20%20.replace(%2F%3C%5B%5E%3E%5D*%3E%2Fg%2C%20%22%20%22)).replace(%2F%5Cs%2B%2Fg%2C%20%22%20%22).trim()%3B%0A%7D%0Afunction%20b64ToUtf8(b64)%7B%0A%20%20if%20(typeof%20Buffer%20!%3D%3D%20%22undefined%22)%20return%20Buffer.from(b64%2C%20%22base64%22).toString(%22utf8%22)%3B%0A%20%20var%20bin%20%3D%20atob(b64.replace(%2F-%2Fg%2C%20%22%2B%22).replace(%2F_%2Fg%2C%20%22%2F%22))%3B%0A%20%20var%20bytes%20%3D%20new%20Uint8Array(bin.length)%3B%0A%20%20for%20(var%20i%20%3D%200%3B%20i%20%3C%20bin.length%3B%20i%2B%2B)%20bytes%5Bi%5D%20%3D%20bin.charCodeAt(i)%3B%0A%20%20return%20new%20TextDecoder(%22utf-8%22).decode(bytes)%3B%0A%7D%0Afunction%20decodeDdgHref(h)%7B%0A%20%20h%20%3D%20String(h%20%7C%7C%20%22%22).trim()%3B%0A%20%20if%20(h.indexOf(%22%2F%2F%22)%20%3D%3D%3D%200)%20h%20%3D%20%22https%3A%22%20%2B%20h%3B%0A%20%20var%20m%20%3D%20%2F%5B%3F%26%5Duddg%3D(%5B%5E%26%5D%2B)%2F.exec(h)%3B%0A%20%20if%20(m)%7B%20try%20%7B%20return%20decodeURIComponent(m%5B1%5D)%3B%20%7D%20catch(e)%7B%20return%20m%5B1%5D%3B%20%7D%20%7D%0A%20%20return%20h%3B%0A%7D%0Afunction%20hostOf(u)%7B%0A%20%20var%20m%20%3D%20%2F%5Ehttps%3F%3A%5C%2F%5C%2F(%5B%5E%5C%2F%22'%5D%2B)%2F.exec(String(u%20%7C%7C%20%22%22))%3B%0A%20%20return%20m%20%3F%20m%5B1%5D%20%3A%20%22%22%3B%0A%7D%0Afunction%20unwrapYandex(u)%7B%0A%20%20u%20%3D%20decodeEntities(u)%3B%0A%20%20var%20m%20%3D%20u.match(%2F%5Ehttps%3F%3A%5C%2F%5C%2Fyandex%5C.%5Ba-z.%5D%2B%5C%2Fclck%5C%2F%5B%5E%5Cs%22'%5D*%3F%5B%3F%26%5D(%3F%3Au%7Curl)%3D(%5B%5E%26%22'%5D%2B)%2Fi)%3B%0A%20%20if%20(!m)%20return%20u%3B%0A%20%20var%20dec%20%3D%20m%5B1%5D%3B%0A%20%20try%20%7B%20dec%20%3D%20decodeURIComponent(dec)%3B%20%7D%20catch(e)%7B%7D%0A%20%20if%20(%2F%5Ehttps%3F%3A%5C%2F%5C%2F%2Fi.test(dec))%20return%20dec%3B%0A%20%20var%20b64%20%3D%20dec.replace(%2F-%2Fg%2C%20%22%2B%22).replace(%2F_%2Fg%2C%20%22%2F%22)%3B%0A%20%20while%20(b64.length%20%25%204)%20b64%20%2B%3D%20%22%3D%22%3B%0A%20%20try%20%7B%0A%20%20%20%20var%20url2%20%3D%20b64ToUtf8(b64)%3B%0A%20%20%20%20if%20(%2F%5Ehttps%3F%3A%5C%2F%5C%2F%2Fi.test(url2))%20return%20url2%3B%0A%20%20%7D%20catch(e)%7B%7D%0A%20%20return%20u%3B%0A%7D%0Afunction%20decodeBingCk(href)%7B%0A%20%20var%20m%20%3D%20%2Fu%3Da1(%5BA-Za-z0-9_-%5D%2B)%2F.exec(String(href%20%7C%7C%20%22%22))%3B%0A%20%20if%20(!m)%20return%20href%3B%0A%20%20try%20%7B%20return%20b64ToUtf8(m%5B1%5D)%3B%20%7D%20catch(e)%7B%20return%20href%3B%20%7D%0A%7D%0A%0A%2F%2F%20----------------------------------------------------------------------------%0A%2F%2F%20%D0%BF%D0%B0%D1%80%D1%81%D0%B5%D1%80%D1%8B%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%20(DOM-aware%3A%20%D1%81%D0%B5%D1%80%D0%B2%D0%B5%D1%80%D0%BD%D1%8B%D0%B9%20HTML%20%2B%20%D0%BE%D1%82%D1%80%D0%B5%D0%BD%D0%B4%D0%B5%D1%80%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%20DOM)%0A%2F%2F%20----------------------------------------------------------------------------%0Afunction%20parseGoogle(html%2C%20doc)%7B%0A%20%20var%20out%20%3D%20%5B%5D%2C%20seen%20%3D%20%7B%7D%3B%0A%20%20var%20skip%20%3D%20%2F(%5E%7C%5C.)google%5C.%5Ba-z.%5D%2B%24%7Cgstatic%5C.com%7Cyoutube%5C.com%7Cblogger%5C.com%7Cgoogleads%2Fi%3B%0A%20%20function%20push(url%2C%20title)%7B%0A%20%20%20%20if%20(!url%20%7C%7C%20!title%20%7C%7C%20seen%5Burl%5D)%20return%3B%0A%20%20%20%20if%20(skip.test(hostOf(url)))%20return%3B%0A%20%20%20%20seen%5Burl%5D%20%3D%201%3B%0A%20%20%20%20out.push(%7B%20title%3A%20decodeEntities(title)%2C%20url%3A%20url%2C%20snippet%3A%20%22%22%20%7D)%3B%0A%20%20%7D%0A%20%20var%20re%20%3D%20%2F%3Ca%5B%5E%3E%5D*href%3D%22%5C%2Furl%5C%3Fq%3D(https%3F%3A%5C%2F%5C%2F%5B%5E%26%22%5D%2B)%5B%5E%22%5D*%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fg%2C%20m%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%20push(decodeEntities(m%5B1%5D)%2C%20m%5B2%5D.replace(%2F%3C%5B%5E%3E%5D%2B%3E%2Fg%2C%20%22%22).trim())%3B%0A%20%20if%20(out.length)%20return%20out%3B%0A%20%20re%20%3D%20%2F%3Ca%5B%5E%3E%5D*href%3D%22(https%3F%3A%5C%2F%5C%2F%5B%5E%22%5D%2B)%22%5B%5E%3E%5D*%3E%5Cs*%3Ch3%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fh3%3E%2Fg%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%20push(decodeEntities(m%5B1%5D)%2C%20m%5B2%5D.replace(%2F%3C%5B%5E%3E%5D%2B%3E%2Fg%2C%20%22%22).trim())%3B%0A%20%20if%20(out.length%20%7C%7C%20!doc)%20return%20out%3B%0A%20%20%2F%2F%20%D0%B6%D0%B8%D0%B2%D0%BE%D0%B9%20DOM%20(Google%20%D0%B4%D0%BE%D1%80%D0%B8%D1%81%D0%BE%D0%B2%D1%8B%D0%B2%D0%B0%D0%B5%D1%82%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D1%83%20%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82%D0%B0%D0%BC%D0%B8)%0A%20%20Array.prototype.forEach.call(doc.querySelectorAll(%22a%20h3%22)%2C%20function(h3)%7B%0A%20%20%20%20var%20a%20%3D%20h3.closest(%22a%22)%3B%0A%20%20%20%20if%20(a%20%26%26%20a.href)%20push(a.href%2C%20h3.textContent.trim())%3B%0A%20%20%7D)%3B%0A%20%20return%20out%3B%0A%7D%0A%0Afunction%20parseYandex(html%2C%20doc)%7B%0A%20%20var%20out%20%3D%20%5B%5D%2C%20seen%20%3D%20%7B%7D%3B%0A%20%20function%20push(url%2C%20title)%7B%0A%20%20%20%20if%20(!url%20%7C%7C%20!title)%20return%3B%0A%20%20%20%20var%20real%20%3D%20unwrapYandex(url)%3B%0A%20%20%20%20if%20(seen%5Breal%5D)%20return%3B%0A%20%20%20%20if%20(%2F%5Ehttps%3F%3A%5C%2F%5C%2F(www%5C.)%3F(yandex%5C.%5Ba-z.%5D%2B%7Cya%5C.ru)(%5C%2F%7C%24)%2Fi.test(real)%20%26%26%0A%20%20%20%20%20%20%20%20real.indexOf(%22%2Fclck%2F%22)%20%3C%200)%20return%3B%0A%20%20%20%20seen%5Breal%5D%20%3D%201%3B%0A%20%20%20%20out.push(%7B%20title%3A%20title%2C%20url%3A%20real%2C%20snippet%3A%20%22%22%20%7D)%3B%0A%20%20%7D%0A%20%20var%20re%20%3D%20%2F%3Ca%5B%5E%3E%5D*class%3D%22%5B%5E%22%5D*organic%5B%5E%22%5D*%22%5B%5E%3E%5D*href%3D%22(%5B%5E%22%5D%2B)%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fg%2C%20m%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%20push(m%5B1%5D%2C%20m%5B2%5D.replace(%2F%3C%5B%5E%3E%5D%2B%3E%2Fg%2C%20%22%22).trim())%3B%0A%20%20re%20%3D%20%2F%3Ca%5B%5E%3E%5D*href%3D%22(%5B%5E%22%5D%2B)%22%5B%5E%3E%5D*class%3D%22%5B%5E%22%5D*organic%5B%5E%22%5D*%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fg%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%20push(m%5B1%5D%2C%20m%5B2%5D.replace(%2F%3C%5B%5E%3E%5D%2B%3E%2Fg%2C%20%22%22).trim())%3B%0A%20%20if%20(out.length%20%7C%7C%20!doc)%20return%20out%3B%0A%20%20Array.prototype.forEach.call(doc.querySelectorAll(%0A%20%20%20%20%22a.OrganicTitle-Link%2C%20a.organic__url%2C%20.organic%20a.Link%2C%20.serp-item%20a.Link%22)%2C%20function(a)%7B%0A%20%20%20%20var%20t%20%3D%20(a.querySelector(%22.OrganicTitleContentSpan%2C%20.organic__url-text%22)%20%7C%7C%20a).textContent.trim()%3B%0A%20%20%20%20push(a.href%2C%20t)%3B%0A%20%20%7D)%3B%0A%20%20return%20out%3B%0A%7D%0A%0Afunction%20parseBingHtml(html%2C%20doc)%7B%0A%20%20var%20out%20%3D%20%5B%5D%2C%20seen%20%3D%20%7B%7D%3B%0A%20%20function%20push(url%2C%20title)%7B%0A%20%20%20%20if%20(!url%20%7C%7C%20!title%20%7C%7C%20seen%5Burl%5D)%20return%3B%0A%20%20%20%20if%20(%2Fbing%5C.com%5C%2F(ck%7Caclick)%2Fi.test(url))%20url%20%3D%20decodeBingCk(url)%3B%0A%20%20%20%20if%20(!%2F%5Ehttps%3F%3A%5C%2F%5C%2F%2Fi.test(url)%20%7C%7C%20%2Fbing%5C.com%5C%2Fsearch%2Fi.test(url))%20return%3B%0A%20%20%20%20seen%5Burl%5D%20%3D%201%3B%0A%20%20%20%20out.push(%7B%20title%3A%20title%2C%20url%3A%20url%2C%20snippet%3A%20%22%22%20%7D)%3B%0A%20%20%7D%0A%20%20var%20re%20%3D%20%2F%3Cli%20class%3D%22b_algo%22%5B%5Cs%5CS%5D*%3F%3Ch2%5B%5E%3E%5D*%3E%5Cs*%3Ca%5B%5E%3E%5D*href%3D%22(%5B%5E%22%5D%2B)%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fgi%2C%20m%3B%0A%20%20while%20((m%20%3D%20re.exec(html)))%0A%20%20%20%20push(decodeEntities(m%5B1%5D)%2C%20decodeEntities(stripTags(m%5B2%5D)).replace(%2F%5Cs%2B%2Fg%2C%20%22%20%22).trim())%3B%0A%20%20if%20(out.length%20%7C%7C%20!doc)%20return%20out%3B%0A%20%20Array.prototype.forEach.call(doc.querySelectorAll(%22li.b_algo%20h2%20a%22)%2C%20function(a)%7B%0A%20%20%20%20push(a.href%2C%20a.textContent.trim())%3B%0A%20%20%7D)%3B%0A%20%20return%20out%3B%0A%7D%0A%0Afunction%20parseDdg(html%2C%20doc)%7B%0A%20%20var%20titles%20%3D%20%5B%5D%2C%20hrefs%20%3D%20%5B%5D%2C%20snips%20%3D%20%5B%5D%2C%20m%3B%0A%20%20var%20reT%20%3D%20%2F%3Ca%5B%5E%3E%5D*class%3D%22%5B%5E%22%5D*result__a%5B%5E%22%5D*%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fgi%3B%0A%20%20while%20((m%20%3D%20reT.exec(html)))%20titles.push(m%5B1%5D)%3B%0A%20%20var%20reH%20%3D%20%2F%3Ca%5B%5E%3E%5D*class%3D%22%5B%5E%22%5D*result__a%5B%5E%22%5D*%22%5B%5E%3E%5D*href%3D(%22%5B%5E%22%5D*%22%7C'%5B%5E'%5D*')%5B%5E%3E%5D*%3E%2Fgi%3B%0A%20%20while%20((m%20%3D%20reH.exec(html)))%20hrefs.push(m%5B1%5D.slice(1%2C%20-1))%3B%0A%20%20var%20reS%20%3D%20%2F%3Ca%5B%5E%3E%5D*class%3D%22%5B%5E%22%5D*result__snippet%5B%5E%22%5D*%22%5B%5E%3E%5D*%3E(%5B%5Cs%5CS%5D*%3F)%3C%5C%2Fa%3E%2Fgi%3B%0A%20%20while%20((m%20%3D%20reS.exec(html)))%20snips.push(m%5B1%5D)%3B%0A%20%20var%20out%20%3D%20%5B%5D%3B%0A%20%20for%20(var%20i%20%3D%200%3B%20i%20%3C%20titles.length%3B%20i%2B%2B)%7B%0A%20%20%20%20var%20url%20%3D%20decodeDdgHref(hrefs%5Bi%5D%20%7C%7C%20%22%22)%3B%0A%20%20%20%20var%20title%20%3D%20stripTags(titles%5Bi%5D)%3B%0A%20%20%20%20if%20(url%20%26%26%20title)%20out.push(%7B%20title%3A%20title%2C%20url%3A%20url%2C%0A%20%20%20%20%20%20snippet%3A%20snips%5Bi%5D%20!%3D%3D%20undefined%20%3F%20stripTags(snips%5Bi%5D)%20%3A%20%22%22%20%7D)%3B%0A%20%20%7D%0A%20%20if%20(out.length%20%7C%7C%20!doc)%20return%20out%3B%0A%20%20Array.prototype.forEach.call(doc.querySelectorAll(%22a.result__a%22)%2C%20function(a)%7B%0A%20%20%20%20var%20t%20%3D%20a.textContent.trim()%3B%0A%20%20%20%20if%20(t)%20out.push(%7B%20title%3A%20t%2C%20url%3A%20a.href%2C%20snippet%3A%20%22%22%20%7D)%3B%0A%20%20%7D)%3B%0A%20%20return%20out%3B%0A%7D%0A%0Avar%20JUNK_HOST%20%3D%20%2F(%5E%7C%5C.)(duckduckgo%5C.com%7Cbrave%5C.com%7Cbing%5C.com%7Cgoogle%5C.%5Ba-z.%5D%2B%7Cyandex%5C.%5Ba-z.%5D%2B%7Cya%5C.ru%7Cmarginalia%5C.nu%7Cmojeek%5C.com%7Cgithub%5C.com%7Cmozilla%5C.org%7Cwikipedia%5C.org%7Caccounts%5C.%7Csupport%5C.%7Chelp%5C.%7Cpolicies%5C.%7Cprivacy%5C.%7Clogin%5C.%7Csignin%5C.%7Csettings%7Cpreferences%7Cconsent)%2Fi%3B%0Avar%20JUNK_TEXT%20%3D%20%2F%5E(%D0%BD%D0%B0%D0%B7%D0%B0%D0%B4%7C%D0%B4%D0%B0%D0%BB%D0%B5%D0%B5%7C%D0%B5%D1%89%D1%91%7Cmore%7Cnext%7Cprevious%7Csign%20in%7Clog%20in%7Cregister%7Csettings%7Cprivacy%7Cterms%7Cabout%7Chelp%7Csupport%7Cfeedback%7Ccareers%7Cblog%7Chome)%5Cb%2Fi%3B%0Afunction%20parseGeneric(html%2C%20selfHost)%7B%0A%20%20var%20out%20%3D%20%5B%5D%2C%20seen%20%3D%20%7B%7D%3B%0A%20%20eachAnchor(html%2C%20function(attrs%2C%20text)%7B%0A%20%20%20%20if%20(out.length%20%3E%3D%2025)%20return%3B%0A%20%20%20%20var%20href%20%3D%20attrGet(attrs%2C%20%22href%22)%3B%0A%20%20%20%20if%20(!%2F%5Ehttps%3F%3A%5C%2F%5C%2F%2Fi.test(href))%7B%0A%20%20%20%20%20%20if%20(href.indexOf(%22%2F%2F%22)%20%3D%3D%3D%200)%20href%20%3D%20%22https%3A%22%20%2B%20href%3B%20else%20return%3B%0A%20%20%20%20%7D%0A%20%20%20%20var%20title%20%3D%20stripTags(text)%3B%0A%20%20%20%20if%20(title.length%20%3C%2025%20%7C%7C%20JUNK_TEXT.test(title))%20return%3B%0A%20%20%20%20var%20host%20%3D%20hostOf(href).replace(%2F%5Ewww%5C.%2F%2C%20%22%22)%3B%0A%20%20%20%20if%20(!host%20%7C%7C%20JUNK_HOST.test(host))%20return%3B%0A%20%20%20%20if%20(selfHost%20%26%26%20host%20%3D%3D%3D%20selfHost)%20return%3B%0A%20%20%20%20if%20(seen%5Bhref%5D)%20return%3B%0A%20%20%20%20seen%5Bhref%5D%20%3D%201%3B%0A%20%20%20%20out.push(%7B%20title%3A%20title%2C%20url%3A%20href%2C%20snippet%3A%20%22%22%20%7D)%3B%0A%20%20%7D)%3B%0A%20%20return%20out%3B%0A%7D%0A%0Afunction%20parseBySrc(src%2C%20html%2C%20doc)%7B%0A%20%20if%20(src%20%3D%3D%3D%20%22google%22)%20return%20parseGoogle(html%2C%20doc)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22yandex%22)%20return%20parseYandex(html%2C%20doc)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22bing%22)%20return%20parseBingHtml(html%2C%20doc)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22ddg%22)%20return%20parseDdg(html%2C%20doc)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22brave%22)%20return%20parseGeneric(html%2C%20%22search.brave.com%22)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22mojeek%22)%20return%20parseGeneric(html%2C%20%22www.mojeek.com%22)%3B%0A%20%20if%20(src%20%3D%3D%3D%20%22marginalia%22)%20return%20parseGeneric(html%2C%20%22marginalia-search.com%22)%3B%0A%20%20%2F%2F%20%D0%BC%D0%B0%D1%80%D0%BA%D0%B5%D1%82%D0%BF%D0%BB%D0%B5%D0%B9%D1%81%D1%8B%3A%20%D0%BF%D0%B0%D1%80%D1%81%D0%B5%D1%80%D1%8B%20(JSON-LD%20Ozon%2C%20JSON-%D0%B1%D0%BB%D0%BE%D0%B1%20Ali%2C%20data-marker%20Avito)%0A%20%20%2F%2F%20%D0%B6%D0%B8%D0%B2%D1%83%D1%82%20%D0%B2%20core.js%20%E2%80%94%20%D1%8E%D0%B7%D0%B5%D1%80%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B0%D0%B5%D1%82%20%D0%B5%D0%B3%D0%BE%20%D1%80%D1%8F%D0%B4%D0%BE%D0%BC%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20%40require%0A%20%20if%20(src%20%3D%3D%3D%20%22ozon%22%20%7C%7C%20src%20%3D%3D%3D%20%22avito%22%20%7C%7C%20src%20%3D%3D%3D%20%22ali%22)%7B%0A%20%20%20%20var%20FS%20%3D%20(typeof%20root%20!%3D%3D%20%22undefined%22%20%26%26%20root.FSCore)%20%7C%7C%0A%20%20%20%20%20%20%20%20%20%20%20%20%20(typeof%20window%20!%3D%3D%20%22undefined%22%20%26%26%20window.FSCore)%20%7C%7C%20null%3B%0A%20%20%20%20if%20(FS%20%26%26%20typeof%20FS.parseBySource%20%3D%3D%3D%20%22function%22)%20return%20FS.parseBySource(src%2C%20html)%3B%0A%20%20%20%20return%20%5B%5D%3B%0A%20%20%7D%0A%20%20return%20%5B%5D%3B%0A%7D%0A%0A%2F%2F%20----------------------------------------------------------------------------%0A%2F%2F%20%D0%98%D0%98-%D0%BE%D1%82%D0%B2%D0%B5%D1%82%D1%8B%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%BE%D0%B2%3A%20Google%20%C2%ABAI%20Overview%C2%BB%2C%20%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81%20%C2%AB%D0%9D%D0%B5%D0%B9%D1%80%D0%BE%C2%BB%2C%20Bing%20%C2%ABCopilot%C2%BB%2C%0A%2F%2F%20Brave%20%C2%ABAnswer%20with%20AI%C2%BB.%20%D0%91%D0%BB%D0%BE%D0%BA%D0%B8%20%D0%BB%D0%B5%D0%BD%D0%B8%D0%B2%D1%8B%D0%B5%20%D0%B8%20%D0%B2%D1%91%D1%80%D1%81%D1%82%D0%BA%D0%B0%20%D0%BC%D0%B5%D0%BD%D1%8F%D0%B5%D1%82%D1%81%D1%8F%20%E2%80%94%20%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D0%BC%0A%2F%2F%20%D1%8D%D0%B2%D1%80%D0%B8%D1%81%D1%82%D0%B8%D0%BA%D0%B0%D0%BC%D0%B8%20%D0%B8%20%D1%87%D0%B5%D1%81%D1%82%D0%BD%D0%BE%20%D0%BF%D0%BE%D0%BC%D0%B5%D1%87%D0%B0%D0%B5%D0%BC%20guess%3Atrue.%20%D0%98%D0%98-%D0%BE%D1%82%D0%B2%D0%B5%D1%82%20%E2%80%94%20%D1%8D%D1%82%D0%BE%20%D1%81%D0%B2%D0%BE%D0%B4%D0%BA%D0%B0%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%B0%2C%0A%2F%2F%20%D0%9D%D0%95%20%D0%BF%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5%20%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%B0%3A%20%D0%BD%D0%B0%20%D1%81%D0%B0%D0%B9%D1%82%20%D0%B8%D0%B4%D1%91%D1%82%20%D0%BE%D1%82%D0%B4%D0%B5%D0%BB%D1%8C%D0%BD%D1%8B%D0%BC%20%D0%BF%D0%BE%D0%BB%D0%B5%D0%BC%2C%20%D0%B2%20%D0%BC%D0%B5%D0%B4%D0%B8%D0%B0%D0%BD%D1%83%20%D0%BD%D0%B5%20%D0%B2%D1%85%D0%BE%D0%B4%D0%B8%D1%82.%0A%2F%2F%20----------------------------------------------------------------------------%0Avar%20AI_HEADINGS%20%3D%20%7B%0A%20%20google%3A%20%2F%5E(ai%20overview%7C%D0%BE%D0%B1%D0%B7%D0%BE%D1%80%20%D1%81%20%D0%B8%D0%B8%7C%D0%BE%D0%B1%D0%B7%D0%BE%D1%80%20%D1%81%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D1%8C%D1%8E%20%D0%B8%D0%B8%7C%D0%BE%D0%B1%D0%B7%D0%BE%D1%80%2C%20%D1%81%D0%BE%D0%B7%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D0%B9%20%D0%B8%D0%B8%7Cai-%D0%BE%D0%B1%D0%B7%D0%BE%D1%80)%2Fi%2C%0A%20%20yandex%3A%20%2F%5E(%D0%BD%D0%B5%D0%B9%D1%80%D0%BE%7Cyandexgpt%7C%D0%BE%D1%82%D0%B2%D0%B5%D1%82%20%D0%BD%D0%B5%D0%B9%D1%80%D0%BE)%2Fi%2C%0A%20%20bing%3A%20%20%20%2F%5E(copilot%7C%D0%BA%D1%80%D0%B0%D1%82%D0%BA%D0%B8%D0%B9%20%D0%BE%D1%82%D0%B2%D0%B5%D1%82%7C%D0%BA%D0%BE%D0%BF%D0%B8%D0%BB%D0%BE%D1%82)%2Fi%2C%0A%20%20brave%3A%20%20%2F%5E(answer%20with%20ai%7C%D0%BE%D1%82%D0%B2%D0%B5%D1%82%20%D1%81%20%D0%B8%D0%B8%7Cai-%D0%BE%D1%82%D0%B2%D0%B5%D1%82)%2Fi%0A%7D%3B%0Afunction%20aiFromHtmlRegex(src%2C%20html)%7B%0A%20%20%2F%2F%20%D0%B7%D0%B0%D0%BF%D0%B0%D1%81%D0%BD%D0%BE%D0%B9%20%D0%BF%D1%83%D1%82%D1%8C%20%D0%B4%D0%BB%D1%8F%20%D1%82%D0%B5%D1%81%D1%82%D0%BE%D0%B2%20%D0%B8%20%D1%81%D0%B5%D1%80%D0%B2%D0%B5%D1%80%D0%BD%D0%BE%D0%B3%D0%BE%20HTML%3A%20%D0%B7%D0%B0%D0%B3%D0%BE%D0%BB%D0%BE%D0%B2%D0%BE%D0%BA%20%E2%86%92%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%20%D0%B4%D0%BE%20~1200%20%D1%81%D0%B8%D0%BC%D0%B2%D0%BE%D0%BB%D0%BE%D0%B2%0A%20%20%2F%2F%20(%5E%20%D0%B2%20AI_HEADINGS%20%D0%BD%D1%83%D0%B6%D0%B5%D0%BD%20%D0%B4%D0%BB%D1%8F%20DOM-%D0%B7%D0%B0%D0%B3%D0%BE%D0%BB%D0%BE%D0%B2%D0%BA%D0%BE%D0%B2%3B%20%D0%B2%20HTML%20%D0%B7%D0%B0%D0%B3%D0%BE%D0%BB%D0%BE%D0%B2%D0%BE%D0%BA%20%D0%B2%20%D1%81%D0%B5%D1%80%D0%B5%D0%B4%D0%B8%D0%BD%D0%B5%20%D1%81%D1%82%D1%80%D0%BE%D0%BA%D0%B8%2C%0A%20%20%2F%2F%20%D0%B0%20%D0%B3%D1%80%D1%83%D0%BF%D0%BF%D0%B0%20%D0%B4%D0%B5%D0%BB%D0%B0%D0%B5%D0%BC%20%D0%BD%D0%B5%D0%B7%D0%B0%D1%85%D0%B2%D0%B0%D1%82%D1%8B%D0%B2%D0%B0%D1%8E%D1%89%D0%B5%D0%B9%20%E2%80%94%20%D0%B8%D0%BD%D0%B0%D1%87%D0%B5%20%D0%BE%D0%BD%D0%B0%20%D1%81%D1%8A%D0%B5%D0%B4%D0%B0%D0%B5%D1%82%20m%5B1%5D)%0A%20%20if%20(!AI_HEADINGS%5Bsrc%5D)%20return%20null%3B%0A%20%20var%20headSrc%20%3D%20AI_HEADINGS%5Bsrc%5D.source.replace(%2F%5E%5C%5E%2F%2C%20%22%22).replace(%22(%22%2C%20%22(%3F%3A%22)%3B%0A%20%20var%20re%20%3D%20new%20RegExp(headSrc%20%2B%0A%20%20%20%20%22%5B%5C%5Cs%5C%5CS%5D%7B0%2C400%7D%3F(%3F%3A%3Cp%5B%5E%3E%5D*%3E%7C%3Cspan%5B%5E%3E%5D*%3E%7C%3Cdiv%5B%5E%3E%5D*%3E)(%5B%5C%5Cs%5C%5CS%5D%7B80%2C1200%7D%3F)%3C%2F(%3F%3Ap%7Cspan)%3E%22%2C%20%22i%22)%3B%0A%20%20var%20m%20%3D%20re.exec(html)%3B%0A%20%20if%20(!m)%20return%20null%3B%0A%20%20var%20text%20%3D%20stripTags(m%5B1%5D)%3B%0A%20%20return%20(text.length%20%3E%3D%2060)%20%3F%20text%20%3A%20null%3B%0A%7D%0Afunction%20aiFromDom(src%2C%20doc)%7B%0A%20%20if%20(!doc%20%7C%7C%20!doc.querySelectorAll)%20return%20null%3B%0A%20%20%2F%2F%201)%20%D0%B8%D1%89%D0%B5%D0%BC%20%D0%B7%D0%B0%D0%B3%D0%BE%D0%BB%D0%BE%D0%B2%D0%BE%D0%BA%20%D0%B1%D0%BB%D0%BE%D0%BA%D0%B0%20%D0%98%D0%98%20%D0%BF%D0%BE%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%D1%83%0A%20%20var%20heads%20%3D%20doc.querySelectorAll(%22h1%2Ch2%2Ch3%2Ch4%2Cdiv%5Brole%3D'heading'%5D%2Cspan%5Brole%3D'heading'%5D%2C%5Bclass*%3D'heading'%20i%5D%22)%3B%0A%20%20for%20(var%20i%20%3D%200%3B%20i%20%3C%20heads.length%3B%20i%2B%2B)%7B%0A%20%20%20%20var%20t%20%3D%20(heads%5Bi%5D.textContent%20%7C%7C%20%22%22).trim()%3B%0A%20%20%20%20if%20(!t%20%7C%7C%20t.length%20%3E%2080)%20continue%3B%0A%20%20%20%20if%20(!AI_HEADINGS%5Bsrc%5D%20%7C%7C%20!AI_HEADINGS%5Bsrc%5D.test(t))%20continue%3B%0A%20%20%20%20%2F%2F%202)%20%D0%BF%D0%BE%D0%B4%D0%BD%D0%B8%D0%BC%D0%B0%D0%B5%D0%BC%D1%81%D1%8F%20%D0%BA%20%D0%BA%D0%BE%D0%BD%D1%82%D0%B5%D0%B9%D0%BD%D0%B5%D1%80%D1%83%20%D1%81%20%D1%81%D0%BE%D0%B4%D0%B5%D1%80%D0%B6%D0%B0%D1%82%D0%B5%D0%BB%D1%8C%D0%BD%D1%8B%D0%BC%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%D0%BE%D0%BC%0A%20%20%20%20var%20el%20%3D%20heads%5Bi%5D%3B%0A%20%20%20%20for%20(var%20up%20%3D%200%3B%20up%20%3C%205%20%26%26%20el%3B%20up%2B%2B)%7B%0A%20%20%20%20%20%20el%20%3D%20el.parentElement%3B%0A%20%20%20%20%20%20if%20(!el)%20break%3B%0A%20%20%20%20%20%20var%20txt%20%3D%20(el.innerText%20%7C%7C%20el.textContent%20%7C%7C%20%22%22).replace(%2F%5Cs%2B%2Fg%2C%20%22%20%22).trim()%3B%0A%20%20%20%20%20%20if%20(txt.length%20%3E%3D%2080%20%26%26%20txt.length%20%3C%3D%204000)%20return%20txt%3B%0A%20%20%20%20%7D%0A%20%20%7D%0A%20%20%2F%2F%203)%20%D0%BA%D0%BB%D0%B0%D1%81%D1%81-%D1%8D%D0%B2%D1%80%D0%B8%D1%81%D1%82%D0%B8%D0%BA%D0%B8%20%D0%B4%D0%BB%D1%8F%20%D0%B8%D0%B7%D0%B2%D0%B5%D1%81%D1%82%D0%BD%D1%8B%D1%85%20%D0%B1%D0%BB%D0%BE%D0%BA%D0%BE%D0%B2%0A%20%20var%20sel%20%3D%20%7B%0A%20%20%20%20google%3A%20%22%5Bclass*%3D'ai-overview'%20i%5D%2C%5Bdata-rl%5D%2Cdiv%5Bid*%3D'aio'%5D%22%2C%0A%20%20%20%20yandex%3A%20%22%5Bclass*%3D'Neuro'%20i%5D%2C%5Bclass*%3D'neuro'%20i%5D%22%2C%0A%20%20%20%20bing%3A%20%20%20%22%5Bclass*%3D'copilot'%20i%5D%2C.b_ans%20.b_promTxt%22%2C%0A%20%20%20%20brave%3A%20%20%22%5Bclass*%3D'answer'%20i%5D%5Bclass*%3D'ai'%20i%5D%2C%5Bdata-type%3D'answer'%5D%22%0A%20%20%7D%5Bsrc%5D%3B%0A%20%20if%20(sel)%7B%0A%20%20%20%20var%20els%20%3D%20doc.querySelectorAll(sel)%3B%0A%20%20%20%20for%20(var%20j%20%3D%200%3B%20j%20%3C%20els.length%3B%20j%2B%2B)%7B%0A%20%20%20%20%20%20var%20txt2%20%3D%20(els%5Bj%5D.innerText%20%7C%7C%20els%5Bj%5D.textContent%20%7C%7C%20%22%22).replace(%2F%5Cs%2B%2Fg%2C%20%22%20%22).trim()%3B%0A%20%20%20%20%20%20if%20(txt2.length%20%3E%3D%2080%20%26%26%20txt2.length%20%3C%3D%204000)%20return%20txt2%3B%0A%20%20%20%20%7D%0A%20%20%7D%0A%20%20return%20null%3B%0A%7D%0Afunction%20extractAi(src%2C%20html%2C%20doc)%7B%0A%20%20var%20t%20%3D%20aiFromDom(src%2C%20doc)%3B%0A%20%20if%20(t)%20return%20%7B%20text%3A%20t%2C%20guess%3A%20false%20%7D%3B%0A%20%20var%20t2%20%3D%20aiFromHtmlRegex(src%2C%20html)%3B%0A%20%20if%20(t2)%20return%20%7B%20text%3A%20t2%2C%20guess%3A%20true%20%7D%3B%0A%20%20return%20null%3B%0A%7D%0A%0A%2F%2F%20----------------------------------------------------------------------------%0A%2F%2F%20%D0%BE%D0%BF%D1%80%D0%B5%D0%B4%D0%B5%D0%BB%D0%B5%D0%BD%D0%B8%D0%B5%20%D0%B8%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%D0%B0%2F%D0%B7%D0%B0%D0%BF%D1%80%D0%BE%D1%81%D0%B0%2C%20%D1%81%D0%B1%D0%BE%D1%80%20%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D1%85%20%D1%81%D0%BE%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D1%8B%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B8%0A%2F%2F%20----------------------------------------------------------------------------%0Avar%20SRC_HOSTS%20%3D%20%5B%0A%20%20%5B%2F(%5E%7C%5C.)google%5C.%5Ba-z.%5D%2B%24%2Fi%2C%20%22google%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)yandex%5C.%5Ba-z.%5D%2B%24%7C(%5E%7C%5C.)ya%5C.ru%24%2Fi%2C%20%22yandex%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)bing%5C.com%24%2Fi%2C%20%22bing%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)duckduckgo%5C.com%24%2Fi%2C%20%22ddg%22%5D%2C%20%20%20%20%20%20%20%20%20%20%20%2F%2F%20html.%2Flite.%20%E2%80%94%20%D1%82%D0%BE%D0%B6%D0%B5%20DDG%0A%20%20%5B%2F(%5E%7C%5C.)brave%5C.com%24%2Fi%2C%20%22brave%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)mojeek%5C.com%24%2Fi%2C%20%22mojeek%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)marginalia-search%5C.com%24%2Fi%2C%20%22marginalia%22%5D%2C%0A%20%20%2F%2F%20%D0%BC%D0%B0%D1%80%D0%BA%D0%B5%D1%82%D0%BF%D0%BB%D0%B5%D0%B9%D1%81%D1%8B%3A%20%D1%81%D0%BA%D1%80%D0%B8%D0%BF%D1%82-%D0%BC%D0%BE%D1%81%D1%82%20%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82%20%D0%B8%20%D0%BD%D0%B0%20%D0%BD%D0%B8%D1%85%20%E2%80%94%20%D1%86%D0%B5%D0%BD%D1%8B%20%D0%B2%20%D1%80%D1%83%D0%B1%D0%BB%D1%8F%D1%85%20%D0%BB%D0%B5%D1%82%D1%8F%D1%82%20%D1%81%D0%B0%D0%BC%D0%B8%0A%20%20%5B%2F(%5E%7C%5C.)ozon%5C.ru%24%2Fi%2C%20%22ozon%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)avito%5C.ru%24%2Fi%2C%20%22avito%22%5D%2C%0A%20%20%5B%2F(%5E%7C%5C.)aliexpress%5C.ru%24%2Fi%2C%20%22ali%22%5D%0A%5D%3B%0Afunction%20detectSrcFromHost(host)%7B%0A%20%20for%20(var%20i%20%3D%200%3B%20i%20%3C%20SRC_HOSTS.length%3B%20i%2B%2B)%0A%20%20%20%20if%20(SRC_HOSTS%5Bi%5D%5B0%5D.test(String(host%20%7C%7C%20%22%22)))%20return%20SRC_HOSTS%5Bi%5D%5B1%5D%3B%0A%20%20return%20null%3B%0A%7D%0A%2F%2F%20v9%3A%20%D0%B7%D0%B0%D0%BF%D1%80%D0%BE%D1%81%20%D1%83%D0%B7%D0%BD%D0%B0%D1%91%D1%82%D1%81%D1%8F%20%D0%B2%20%D0%BB%D1%8E%D0%B1%D0%BE%D0%BC%20%D1%80%D0%B5%D0%B3%D0%B8%D1%81%D1%82%D1%80%D0%B5%20%D0%BF%D0%B0%D1%80%D0%B0%D0%BC%D0%B5%D1%82%D1%80%D0%B0%20(AliExpress%20%3FSearchText%3D%E2%80%A6)%2C%0A%2F%2F%20item'%D1%8B%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B8%20%D0%BF%D0%BE%D0%BB%D1%83%D1%87%D0%B0%D1%8E%D1%82%20%D0%BA%D0%B0%D1%80%D1%82%D0%B8%D0%BD%D0%BA%D1%83%20%D1%80%D0%B5%D0%B7%D1%83%D0%BB%D1%8C%D1%82%D0%B0%D1%82%D0%B0%20(img)%20%E2%80%94%20ec-%D0%BA%D0%B0%D1%80%D1%82%D0%BE%D1%87%D0%BA%D0%B0%20%D1%80%D0%B8%D1%81%D1%83%D0%B5%D1%82%20%D0%B5%D1%91%0A%2F%2F%20%D1%81%D0%BB%D0%B5%D0%B2%D0%B0%3B%20%D0%BF%D0%BE%D1%82%D0%B5%D1%80%D1%8F%D0%BB%D0%B0%D1%81%D1%8C%20%E2%80%94%20%D0%BF%D0%BB%D0%B5%D0%B9%D1%81%D1%85%D0%BE%D0%BB%D0%B4%D0%B5%D1%80%20%D1%81%20%D0%BF%D0%B5%D1%80%D0%B2%D0%BE%D0%B9%20%D0%B1%D1%83%D0%BA%D0%B2%D0%BE%D0%B9.%0Afunction%20detectQueryFromSearch(search)%7B%0A%20%20var%20KEYS%20%3D%20%5B%22q%22%2C%20%22text%22%2C%20%22query%22%2C%20%22searchtext%22%2C%20%22k%22%5D%3B%0A%20%20try%20%7B%0A%20%20%20%20var%20sp%20%3D%20new%20URLSearchParams(String(search%20%7C%7C%20%22%22))%3B%0A%20%20%20%20var%20hit%20%3D%20null%3B%0A%20%20%20%20sp.forEach(function(v%2C%20key)%7B%0A%20%20%20%20%20%20var%20lk%20%3D%20String(key).toLowerCase()%3B%0A%20%20%20%20%20%20if%20(!hit%20%26%26%20KEYS.indexOf(lk)%20%3E%3D%200%20%26%26%20v)%20hit%20%3D%20v%3B%0A%20%20%20%20%7D)%3B%0A%20%20%20%20return%20hit%20%7C%7C%20%22%22%3B%0A%20%20%7D%20catch(e)%7B%20return%20%22%22%3B%20%7D%0A%7D%0A%2F%2F%20%D1%81%D0%BB%D0%BE%D0%B2%D0%B0%D1%80%D1%8C%20%C2%ABURL%20%D1%80%D0%B5%D0%B7%D1%83%D0%BB%D1%8C%D1%82%D0%B0%D1%82%D0%B0%20%E2%86%92%20%D0%BA%D0%B0%D1%80%D1%82%D0%B8%D0%BD%D0%BA%D0%B0%C2%BB%20%D0%BE%D0%B4%D0%BD%D0%B8%D0%BC%20%D0%BF%D1%80%D0%BE%D1%85%D0%BE%D0%B4%D0%BE%D0%BC%20%D0%BF%D0%BE%20%3Ca%3E%3A%20%D0%BA%D0%B0%D1%80%D1%82%D0%B8%D0%BD%D0%BA%D0%B0%20%D0%B6%D0%B8%D0%B2%D1%91%D1%82%0A%2F%2F%20%D0%B2%20%D1%81%D0%B0%D0%BC%D0%BE%D0%B9%20%D1%81%D1%81%D1%8B%D0%BB%D0%BA%D0%B5%20(%D0%BC%D0%B0%D1%80%D0%BA%D0%B5%D1%82%D0%BF%D0%BB%D0%B5%D0%B9%D1%81%D1%8B)%20%D0%B8%D0%BB%D0%B8%20%D0%B2%20%D1%81%D0%BE%D1%81%D0%B5%D0%B4%D0%BD%D0%B5%D0%BC%20%D0%BA%D0%BE%D0%BD%D1%82%D0%B5%D0%B9%D0%BD%D0%B5%D1%80%D0%B5%20(%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%B8).%0A%2F%2F%20%D0%9F%D1%81%D0%B5%D0%B2%D0%B4%D0%BE-%D0%B8%D0%BA%D0%BE%D0%BD%D0%BA%D0%B8%20(data%3Asvg%2C%20favicon%2C%20logo%2C%20sprite)%20%D0%B2%D1%8B%D0%B1%D1%80%D0%B0%D1%81%D1%8B%D0%B2%D0%B0%D0%B5%D0%BC.%0Afunction%20extractImages(doc)%7B%0A%20%20var%20map%20%3D%20%7B%7D%3B%0A%20%20try%20%7B%0A%20%20%20%20var%20list%20%3D%20doc.querySelectorAll(%22a%5Bhref%5D%22)%3B%0A%20%20%20%20for%20(var%20i%20%3D%200%3B%20i%20%3C%20list.length%20%26%26%20Object.keys(map).length%20%3C%2080%3B%20i%2B%2B)%7B%0A%20%20%20%20%20%20var%20a%20%3D%20list%5Bi%5D%2C%20img%20%3D%20a.querySelector(%22img%22)%3B%0A%20%20%20%20%20%20if%20(!img)%7B%0A%20%20%20%20%20%20%20%20var%20p%20%3D%20a.parentElement%3B%0A%20%20%20%20%20%20%20%20if%20(p)%20img%20%3D%20p.querySelector(%22img%22)%3B%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20if%20(!img)%20continue%3B%0A%20%20%20%20%20%20var%20u%20%3D%20img.currentSrc%20%7C%7C%20img.getAttribute(%22src%22)%20%7C%7C%20img.getAttribute(%22data-src%22)%20%7C%7C%20%22%22%3B%0A%20%20%20%20%20%20if%20(!u)%7B%0A%20%20%20%20%20%20%20%20var%20ss%20%3D%20img.getAttribute(%22srcset%22)%20%7C%7C%20%22%22%3B%0A%20%20%20%20%20%20%20%20u%20%3D%20ss.split(%22%2C%22)%5B0%5D.split(%2F%5Cs%2B%2F)%5B0%5D%20%7C%7C%20%22%22%3B%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20if%20(!u%20%7C%7C%20%2F%5Edata%3Aimage%5C%2Fsvg%2F.test(u)%20%7C%7C%20%2Ffavicon%7Clogo%7Csprite%7C%5C%2Ficons%3F%5C%2F%2Fi.test(u))%20continue%3B%0A%20%20%20%20%20%20if%20(!%2F%5Ehttps%3F%3A%2F.test(u))%20u%20%3D%20(new%20URL(u%2C%20doc.baseURI)).href%3B%0A%20%20%20%20%20%20var%20keys%20%3D%20%5Ba.href%2C%20a.href.split(%22%3F%22)%5B0%5D%5D%3B%0A%20%20%20%20%20%20try%20%7B%20keys.push(decodeURIComponent(a.href))%3B%20%7D%20catch(e)%7B%7D%0A%20%20%20%20%20%20keys.forEach(function(k)%7B%20if%20(k%20%26%26%20!map%5Bk%5D)%20map%5Bk%5D%20%3D%20u%3B%20%7D)%3B%0A%20%20%20%20%7D%0A%20%20%7D%20catch(e)%7B%7D%0A%20%20return%20map%3B%0A%7D%0Afunction%20collect()%7B%0A%20%20var%20src%20%3D%20detectSrcFromHost(location.host)%3B%0A%20%20var%20q%20%3D%20detectQueryFromSearch(location.search)%3B%0A%20%20var%20html%20%3D%20document.documentElement.outerHTML%3B%0A%20%20var%20items%20%3D%20src%20%3F%20parseBySrc(src%2C%20html%2C%20document)%20%3A%20%5B%5D%3B%0A%20%20if%20(items.length%20%26%26%20document.querySelectorAll(%22img%22).length)%7B%0A%20%20%20%20var%20imgs%20%3D%20extractImages(document)%3B%0A%20%20%20%20items.forEach(function(it)%7B%0A%20%20%20%20%20%20if%20(it.img)%20return%3B%0A%20%20%20%20%20%20var%20keys%20%3D%20%5Bit.url%2C%20String(it.url%20%7C%7C%20%22%22).split(%22%3F%22)%5B0%5D%5D%3B%0A%20%20%20%20%20%20try%20%7B%20keys.push(decodeURIComponent(it.url))%3B%20%7D%20catch(e)%7B%7D%0A%20%20%20%20%20%20for%20(var%20j%20%3D%200%3B%20j%20%3C%20keys.length%3B%20j%2B%2B)%7B%0A%20%20%20%20%20%20%20%20if%20(keys%5Bj%5D%20%26%26%20imgs%5Bkeys%5Bj%5D%5D)%7B%20it.img%20%3D%20imgs%5Bkeys%5Bj%5D%5D%3B%20break%3B%20%7D%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%7D)%3B%0A%20%20%7D%0A%20%20var%20ai%20%3D%20src%20%3F%20extractAi(src%2C%20html%2C%20document)%20%3A%20null%3B%0A%20%20return%20%7B%20src%3A%20src%2C%20q%3A%20q%2C%20items%3A%20items%2C%20ai%3A%20ai%2C%20html%3A%20html%20%7D%3B%0A%7D%0A%2F%2F%20%D1%86%D0%B5%D0%BD%D0%B0%20%D0%B8%D0%B7%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%D0%B0%20%D1%80%D0%B5%D0%B7%D1%83%D0%BB%D1%8C%D1%82%D0%B0%D1%82%D0%B0%20%E2%80%94%20%D0%BB%D0%BE%D0%B3%D0%B8%D0%BA%D0%B0%201%3A1%20%D1%81%20core.js%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0%20(FS.priceFromText)%0Afunction%20priceFromText(title%2C%20snippet)%7B%0A%20%20var%20t%20%3D%20String(title%20%7C%7C%20%22%22)%20%2B%20%22%20%22%20%2B%20String(snippet%20%7C%7C%20%22%22)%3B%0A%20%20%2F%2F%20%D1%87%D0%B8%D1%81%D0%BB%D0%BE%3A%20%C2%AB12%20500%C2%BB%2C%20%C2%AB1%2C499.00%C2%BB%2C%20%C2%AB12990%C2%BB%2C%20%C2%AB89%2C99%C2%BB%20%E2%80%94%20%D0%BD%D0%BE%20%D0%9D%D0%95%20%C2%AB24%2012%20500%C2%BB%20%D0%B8%D0%B7%0A%20%20%2F%2F%20%C2%AB%E2%80%A6A7L%2024%2012%20500%20%E2%82%BD%C2%BB%20(%D0%B3%D1%80%D1%83%D0%BF%D0%BF%D1%8B%20%D1%82%D1%8B%D1%81%D1%8F%D1%87%20%D1%81%D1%82%D1%80%D0%BE%D0%B3%D0%BE%20%D0%BF%D0%BE%203%20%D1%86%D0%B8%D1%84%D1%80%D1%8B%20%D0%BF%D0%BE%D1%81%D0%BB%D0%B5%20%D1%80%D0%B0%D0%B7%D0%B4%D0%B5%D0%BB%D0%B8%D1%82%D0%B5%D0%BB%D1%8F)%0A%20%20var%20numRe%20%3D%20%22%5C%5Cd%7B1%2C3%7D(%3F%3A%5B%5C%5Cs%5C%5Cu00a0%2C%5D%5C%5Cd%7B3%7D)%2B(%3F%3A%5C%5C.%5C%5Cd%7B1%2C2%7D)%3F%7C%5C%5Cd%2B(%3F%3A%5B.%2C%5D%5C%5Cd%7B1%2C2%7D)%3F%22%3B%0A%20%20var%20m%2C%20num%2C%20cur%3B%0A%20%20if%20((m%20%3D%20new%20RegExp(%22(%D0%BE%D1%82%5C%5Cs%2B)%3F(%22%20%2B%20numRe%20%2B%20%22)%5C%5Cs*(%3F%3A%E2%82%BD%7C%D1%80%D1%83%D0%B1%5C%5C.%3F%7Crub%7C%D1%80%5C%5C.)(%3F!%5B%5C%5Cw%D0%B0-%D1%8F%D1%91%5D)%22%2C%20%22i%22).exec(t)))%7B%0A%20%20%20%20num%20%3D%20m%5B2%5D%3B%20cur%20%3D%20%22RUB%22%3B%0A%20%20%7D%20else%20if%20((m%20%3D%20new%20RegExp(%22(%D0%BE%D1%82%5C%5Cs%2B)%3F(%5B%24%E2%82%AC%5D)%5C%5Cs*(%22%20%2B%20numRe%20%2B%20%22)%22).exec(t)))%7B%0A%20%20%20%20num%20%3D%20m%5B3%5D%3B%20cur%20%3D%20m%5B2%5D%20%3D%3D%3D%20%22%24%22%20%3F%20%22USD%22%20%3A%20%22EUR%22%3B%0A%20%20%7D%20else%20if%20((m%20%3D%20new%20RegExp(%22(%D0%BE%D1%82%5C%5Cs%2B)%3F(%22%20%2B%20numRe%20%2B%20%22)%5C%5Cs*(%5B%24%E2%82%AC%5D)%22).exec(t)))%7B%0A%20%20%20%20num%20%3D%20m%5B2%5D%3B%20cur%20%3D%20m%5B3%5D%20%3D%3D%3D%20%22%24%22%20%3F%20%22USD%22%20%3A%20%22EUR%22%3B%0A%20%20%7D%20else%20return%20null%3B%0A%20%20%2F%2F%20%D1%80%D0%B0%D0%B7%D0%B4%D0%B5%D0%BB%D0%B8%D1%82%D0%B5%D0%BB%D0%B8%3A%20%C2%AB1%2C499.00%C2%BB%20%E2%86%92%201499.00%2C%20%C2%AB89%2C99%C2%BB%20%E2%86%92%2089.99%2C%20%C2%AB12.990%C2%BB%20%E2%86%92%2012990%20%E2%80%94%201%3A1%20%D1%81%20core.js%0A%20%20num%20%3D%20num.replace(%2F%5B%5Cs%5Cu00a0%5D%2Fg%2C%20%22%22)%3B%0A%20%20var%20parts%20%3D%20%2F%5E(.%2B%3F)(%5B.%2C%5D)(%5Cd%7B1%2C2%7D)%24%2F.exec(num)%3B%0A%20%20if%20(parts)%20num%20%3D%20parts%5B1%5D.replace(%2F%5B.%2C%5D%2Fg%2C%20%22%22)%20%2B%20%22.%22%20%2B%20parts%5B3%5D%3B%0A%20%20else%20num%20%3D%20num.replace(%2F%5B.%2C%5D%2Fg%2C%20%22%22)%3B%0A%20%20var%20v%20%3D%20parseFloat(num)%3B%0A%20%20return%20(isFinite(v)%20%26%26%20v%20%3E%200)%20%3F%20%7B%20price%3A%20v%2C%20currency%3A%20cur%20%7D%20%3A%20null%3B%0A%7D%0A%2F%2F%20%D1%87%D0%B5%D1%81%D1%82%D0%BD%D0%BE%D0%B5%20%D0%BF%D1%80%D0%BE%D0%B8%D1%81%D1%85%D0%BE%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D0%B5%20%D1%86%D0%B5%D0%BD%D1%8B%3A%20market%20%E2%80%94%20%D0%BF%D0%B0%D1%80%D1%81%D0%B5%D1%80%20%D0%BF%D0%BB%D0%BE%D1%89%D0%B0%D0%B4%D0%BA%D0%B8%2C%20snippet%20%E2%80%94%20%D0%B8%D0%B7%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B8%20(%E2%89%88)%0Avar%20MARKET_IDS%20%3D%20%7B%20ozon%3A%201%2C%20avito%3A%201%2C%20ali%3A%201%20%7D%3B%0Afunction%20priceOfItem(it%2C%20src)%7B%0A%20%20if%20(it.price%20!%3D%20null%20%26%26%20isFinite(it.price))%0A%20%20%20%20return%20%7B%20price%3A%20it.price%2C%20currency%3A%20it.currency%20%7C%7C%20(MARKET_IDS%5Bsrc%5D%20%3F%20%22RUB%22%20%3A%20null)%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20%20via%3A%20MARKET_IDS%5Bsrc%5D%20%3F%20%22market%22%20%3A%20null%20%7D%3B%0A%20%20var%20p%20%3D%20priceFromText(it.title%2C%20it.snippet)%3B%0A%20%20if%20(p)%20return%20%7B%20price%3A%20p.price%2C%20currency%3A%20p.currency%2C%20via%3A%20%22snippet%22%20%7D%3B%0A%20%20return%20%7B%20price%3A%20null%2C%20currency%3A%20null%2C%20via%3A%20null%20%7D%3B%0A%7D%0Afunction%20buildPayload(c)%7B%0A%20%20var%20p%20%3D%20%7B%20fsBridge%3A%201%2C%20v%3A%202%2C%20src%3A%20c.src%2C%20q%3A%20c.q%20%7C%7C%20%22%22%2C%20ts%3A%20Date.now()%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20host%3A%20(typeof%20location%20!%3D%3D%20%22undefined%22%20%3F%20location.host%20%3A%20%22%22)%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20items%3A%20(c.items%20%7C%7C%20%5B%5D).slice(0%2C%2040).map(function(it)%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20var%20pv%20%3D%20priceOfItem(it%2C%20c.src)%3B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20return%20%7B%20title%3A%20String(it.title%20%7C%7C%20%22%22).slice(0%2C%20300)%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20url%3A%20String(it.url%20%7C%7C%20%22%22)%2C%20snippet%3A%20String(it.snippet%20%7C%7C%20%22%22).slice(0%2C%20300)%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20price%3A%20pv.price%2C%20currency%3A%20pv.currency%2C%20priceVia%3A%20pv.via%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20sourceType%3A%20MARKET_IDS%5Bc.src%5D%20%3F%20%22market%22%20%3A%20%22serp%22%20%7D%3B%0A%20%20%20%20%20%20%20%20%20%20%20%20%7D)%2C%0A%20%20%20%20%20%20%20%20%20%20%20%20ai%3A%20c.ai%20%3F%20%7B%20src%3A%20c.src%2C%20text%3A%20String(c.ai.text%20%7C%7C%20%22%22).slice(0%2C%204000)%2C%20guess%3A%20!!c.ai.guess%20%7D%20%3A%20null%20%7D%3B%0A%20%20if%20(!p.items.length)%20p.html%20%3D%20String(c.html%20%7C%7C%20%22%22).slice(0%2C%201500000)%3B%0A%20%20return%20p%3B%0A%7D%0A%2F%2F%20%D1%84%D0%BE%D0%BB%D0%B1%D1%8D%D0%BA-%D0%BA%D0%BE%D0%BF%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5%20%D0%B2%20%D0%B1%D1%83%D1%84%D0%B5%D1%80%20(%D0%BA%D0%BE%D0%B3%D0%B4%D0%B0%20navigator.clipboard%20%D0%BD%D0%B5%D0%B4%D0%BE%D1%81%D1%82%D1%83%D0%BF%D0%B5%D0%BD)%0Afunction%20legacyCopy(text)%7B%0A%20%20var%20ta%20%3D%20document.createElement(%22textarea%22)%3B%0A%20%20ta.value%20%3D%20text%3B%0A%20%20ta.style.cssText%20%3D%20%22position%3Afixed%3Bleft%3A-9999px%3Btop%3A0%22%3B%0A%20%20document.body.appendChild(ta)%3B%0A%20%20ta.select()%3B%0A%20%20try%20%7B%20document.execCommand(%22copy%22)%3B%20%7D%20catch(e)%7B%7D%0A%20%20ta.remove()%3B%0A%7D%0A%0A%2F%2F%20----------------------------------------------------------------------------%0A%2F%2F%20%D0%BF%D1%80%D0%B8%D1%91%D0%BC%20%D0%BD%D0%B0%20%D1%81%D1%82%D0%BE%D1%80%D0%BE%D0%BD%D0%B5%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0%3A%20%D0%B2%D0%B0%D0%BB%D0%B8%D0%B4%D0%B0%D1%86%D0%B8%D1%8F%20payload'%D0%B0%20(%D1%81%D0%B0%D0%BC%20%D0%BF%D0%B0%D1%80%D1%81%D0%B8%D0%BD%D0%B3%20%D0%B4%D0%B5%D0%BB%D0%B0%D0%B5%D1%82%20app.js)%0A%2F%2F%20----------------------------------------------------------------------------%0Afunction%20validatePayload(p)%7B%0A%20%20return%20!!(p%20%26%26%20p.fsBridge%20%3D%3D%3D%201%20%26%26%20p.src%20%26%26%20detectSrcFromHostHostAlias(p.src)%20%26%26%0A%20%20%20%20%20%20%20%20%20%20%20%20(Array.isArray(p.items)%20%7C%7C%20typeof%20p.html%20%3D%3D%3D%20%22string%22))%3B%0A%7D%0Afunction%20detectSrcFromHostHostAlias(src)%7B%0A%20%20%2F%2F%20src%20%D0%B2%20payload%20%E2%80%94%20id%20%D0%B8%D1%81%D1%82%D0%BE%D1%87%D0%BD%D0%B8%D0%BA%D0%B0%3A%207%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%BE%D0%B2%20%D0%B8%D0%BB%D0%B8%20%D0%BC%D0%B0%D1%80%D0%BA%D0%B5%D1%82%D0%BF%D0%BB%D0%B5%D0%B9%D1%81%20%D1%81%20%D1%86%D0%B5%D0%BD%D0%B0%D0%BC%D0%B8%0A%20%20return%20%2F%5E(google%7Cyandex%7Cbing%7Cddg%7Cbrave%7Cmojeek%7Cmarginalia%7Cozon%7Cavito%7Cali)%24%2F.test(String(src))%3B%0A%7D%0A%0Avar%20api%20%3D%20%7B%0A%20%20decodeEntities%3A%20decodeEntities%2C%20stripTags%3A%20stripTags%2C%20eachAnchor%3A%20eachAnchor%2C%0A%20%20attrGet%3A%20attrGet%2C%20b64ToUtf8%3A%20b64ToUtf8%2C%20decodeDdgHref%3A%20decodeDdgHref%2C%0A%20%20hostOf%3A%20hostOf%2C%20unwrapYandex%3A%20unwrapYandex%2C%20decodeBingCk%3A%20decodeBingCk%2C%0A%20%20parseGoogle%3A%20parseGoogle%2C%20parseYandex%3A%20parseYandex%2C%20parseBingHtml%3A%20parseBingHtml%2C%0A%20%20parseDdg%3A%20parseDdg%2C%20parseGeneric%3A%20parseGeneric%2C%20parseBySrc%3A%20parseBySrc%2C%0A%20%20extractAi%3A%20extractAi%2C%20aiFromHtmlRegex%3A%20aiFromHtmlRegex%2C%0A%20%20detectSrcFromHost%3A%20detectSrcFromHost%2C%20detectQueryFromSearch%3A%20detectQueryFromSearch%2C%0A%20%20collect%3A%20collect%2C%20buildPayload%3A%20buildPayload%2C%20legacyCopy%3A%20legacyCopy%2C%0A%20%20priceFromText%3A%20priceFromText%2C%20priceOfItem%3A%20priceOfItem%2C%0A%20%20validatePayload%3A%20validatePayload%0A%7D%3B%0A%0Aif%20(typeof%20module%20!%3D%3D%20%22undefined%22%20%26%26%20module.exports)%20module.exports%20%3D%20api%3B%0Aelse%20root.FSBridge%20%3D%20api%3B%0A%7D)(typeof%20window%20!%3D%3D%20%22undefined%22%20%3F%20window%20%3A%20this)%3B%0A%0A%2F*%20%3D%3D%3D%3D%20%D0%B4%D0%B5%D0%B9%D1%81%D1%82%D0%B2%D0%B8%D0%B5%20%D0%B7%D0%B0%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B8%20%3D%3D%3D%3D%20*%2F%0A%2F%2F%20%D0%94%D0%B5%D0%B9%D1%81%D1%82%D0%B2%D0%B8%D0%B5%20%D0%B1%D1%83%D0%BA%D0%BC%D0%B0%D1%80%D0%BA%D0%BB%D0%B5%D1%82%D0%B0%3A%20%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%B0%D0%B5%D1%82%20%D0%9F%D0%9E%D0%A1%D0%9B%D0%95%20inline%20bridge-lib.js%20(window.FSBridge%20%D0%B3%D0%BE%D1%82%D0%BE%D0%B2).%0A%2F%2F%20%D0%9A%D0%BB%D0%B8%D0%BA%20%D0%BD%D0%B0%20%D0%B7%D0%B0%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B5%20%C2%AB%F0%9F%93%A8%20%D0%B2%20%D1%84%D0%B8%D0%BB%D1%8C%D1%82%D1%80%20%D1%82%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%C2%BB%20%D0%BD%D0%B0%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B5%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B8%3A%0A%2F%2F%20%20%201)%20%D0%BF%D0%B0%D1%80%D1%81%D0%B8%D0%BC%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D1%83%20%2B%20%D0%98%D0%98-%D0%BE%D1%82%D0%B2%D0%B5%D1%82%20%D0%BF%D1%80%D1%8F%D0%BC%D0%BE%20%D0%B2%20%D0%BA%D0%BE%D0%BD%D1%82%D0%B5%D0%BA%D1%81%D1%82%D0%B5%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D1%8B%20(%D0%BD%D0%B0%D1%88%D0%B8%20%D0%BF%D0%B0%D1%80%D1%81%D0%B5%D1%80%D1%8B)%3B%0A%2F%2F%20%20%202)%20%D0%B5%D1%81%D0%BB%D0%B8%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D1%83%20%D0%BE%D1%82%D0%BA%D1%80%D1%8B%D0%BB%20%D0%BD%D0%B0%D1%88%20%D1%81%D0%B0%D0%B9%D1%82%20%D0%B8%20%D1%81%D0%B2%D1%8F%D0%B7%D1%8C%20%D0%BD%D0%B5%20%D1%80%D0%B0%D0%B7%D0%BE%D1%80%D0%B2%D0%B0%D0%BD%D0%B0%20(opener%20%D0%B6%D0%B8%D0%B2)%20%E2%80%94%0A%2F%2F%20%20%20%20%20%20window.opener.postMessage%20%D0%B8%20window.close()%3B%0A%2F%2F%20%20%203)%20%D0%B8%D0%BD%D0%B0%D1%87%D0%B5%20(Google%2F%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81%2FBing%20%D1%80%D0%B2%D1%83%D1%82%20opener%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20COOP)%20%E2%80%94%20%D1%83%D0%BD%D0%B8%D0%B2%D0%B5%D1%80%D1%81%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%0A%2F%2F%20%20%20%20%20%20%C2%AB%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B0-%D0%BF%D0%BE%D1%87%D1%82%D0%B0%D0%BB%D1%8C%D0%BE%D0%BD%C2%BB%3A%20%D0%BD%D0%B0%D0%B2%D0%B8%D0%B3%D0%B8%D1%80%D1%83%D0%B5%D0%BC%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D1%83%20%D0%BD%D0%B0%20%D1%81%D0%B0%D0%B9%D1%82%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D0%B0%20%D1%81%20%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D0%BC%D0%B8%0A%2F%2F%20%20%20%20%20%20%D0%B2%20%D0%B0%D0%B4%D1%80%D0%B5%D1%81%D0%B5%20(%23fsRelay%3D%E2%80%A6)%3B%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0-%D1%80%D0%B5%D0%BB%D0%B5%D0%B9%20%D0%BD%D0%B0%20%D0%BD%D0%B0%D1%88%D0%B5%D0%BC%20origin%20%D0%BF%D0%B5%D1%80%D0%B5%D0%B4%D0%B0%D1%91%D1%82%20payload%0A%2F%2F%20%20%20%20%20%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%D1%83%20%D1%87%D0%B5%D1%80%D0%B5%D0%B7%20BroadcastChannel%20%D0%B8%20%D0%B7%D0%B0%D0%BA%D1%80%D1%8B%D0%B2%D0%B0%D0%B5%D1%82%D1%81%D1%8F%20%D1%81%D0%B0%D0%BC%D0%B0.%20COOP%20%D1%8D%D1%82%D0%BE%D0%BC%D1%83%20%D0%BD%D0%B5%0A%2F%2F%20%20%20%20%20%20%D0%BC%D0%B5%D1%88%D0%B0%D0%B5%D1%82%3A%20%D0%B7%D0%B0%D0%BF%D1%80%D0%B5%D1%82%20%D0%BA%D0%B0%D1%81%D0%B0%D0%B5%D1%82%D1%81%D1%8F%20%D1%81%D0%B2%D1%8F%D0%B7%D0%B8%20%D1%81%20%D1%87%D1%83%D0%B6%D0%B8%D0%BC%20origin%2C%20%D0%B0%20%D0%BD%D0%B5%20%D0%BD%D0%B0%D0%B2%D0%B8%D0%B3%D0%B0%D1%86%D0%B8%D0%B8.%0A(function()%7B%0A%20%20var%20FB%20%3D%20(typeof%20FSBridge%20!%3D%3D%20%22undefined%22)%20%3F%20FSBridge%20%3A%20(window%20%26%26%20window.FSBridge)%3B%0A%20%20if%20(!FB%20%7C%7C%20typeof%20FB.collect%20!%3D%3D%20%22function%22)%7B%20alert(%22%D0%BC%D0%BE%D1%81%D1%82%20%D0%BD%D0%B5%20%D1%81%D0%BE%D0%B1%D1%80%D0%B0%D0%BB%D1%81%D1%8F%20%E2%80%94%20%D0%BF%D0%B5%D1%80%D0%B5%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%B8%20%D0%B7%D0%B0%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D1%83%22)%3B%20return%3B%20%7D%0A%20%20if%20(!FB.detectSrcFromHost(location.host))%7B%0A%20%20%20%20alert(%22%D1%8D%D1%82%D0%BE%20%D0%BD%D0%B5%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0%20%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B8%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%BE%D0%B2%D0%B8%D0%BA%D0%B0%20%E2%80%94%20%D0%BE%D1%82%D0%BA%D1%80%D0%BE%D0%B9%20Google%20%2F%20%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81%20%2F%20Bing%20%2F%20DDG%20%2F%20Brave%20%D1%81%20%D1%80%D0%B5%D0%B7%D1%83%D0%BB%D1%8C%D1%82%D0%B0%D1%82%D0%B0%D0%BC%D0%B8%20%D0%BF%D0%BE%D0%B8%D1%81%D0%BA%D0%B0%22)%3B%0A%20%20%20%20return%3B%0A%20%20%7D%0A%20%20var%20c%20%3D%20FB.collect()%3B%0A%20%20if%20(!c.items.length%20%26%26%20!c.ai)%7B%0A%20%20%20%20alert(%22%D0%B2%D1%8B%D0%B4%D0%B0%D1%87%D0%B0%20%D0%BD%D0%B5%20%D1%80%D0%B0%D1%81%D0%BF%D0%BE%D0%B7%D0%BD%D0%B0%D0%BD%D0%B0%20(%D0%B2%D1%91%D1%80%D1%81%D1%82%D0%BA%D0%B0%20%D0%B8%D0%B7%D0%BC%D0%B5%D0%BD%D0%B8%D0%BB%D0%B0%D1%81%D1%8C%20%D0%B8%D0%BB%D0%B8%20%D1%8D%D1%82%D0%BE%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0-%D0%B7%D0%B0%D0%B3%D0%BB%D1%83%D1%88%D0%BA%D0%B0)%20%E2%80%94%20%D0%B2%20%D1%84%D0%B8%D0%BB%D1%8C%D1%82%D1%80%20%D1%83%D0%B9%D0%B4%D1%91%D1%82%20%D0%B2%D1%81%D1%8F%20%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0%20%D1%86%D0%B5%D0%BB%D0%B8%D0%BA%D0%BE%D0%BC%2C%20%D0%BE%D0%BD%20%D1%80%D0%B0%D0%B7%D0%B1%D0%B5%D1%80%D1%91%D1%82%20%D1%81%D0%B0%D0%BC%22)%3B%0A%20%20%7D%0A%20%20var%20payload%20%3D%20FB.buildPayload(c)%3B%0A%0A%20%20function%20b64url(s)%7B%0A%20%20%20%20return%20btoa(unescape(encodeURIComponent(s)))%0A%20%20%20%20%20%20.replace(%2F%5C%2B%2Fg%2C%20%22-%22).replace(%2F%5C%2F%2Fg%2C%20%22_%22).replace(%2F%3D%2B%24%2F%2C%20%22%22)%3B%0A%20%20%7D%0A%0A%20%20%2F%2F%20%D0%B1%D1%8B%D1%81%D1%82%D1%80%D0%B0%D1%8F%20%D1%81%D0%B2%D1%8F%D0%B7%D1%8C%3A%20%D0%B0%D0%B3%D1%80%D0%B5%D0%B3%D0%B0%D1%82%D0%BE%D1%80%20%E2%80%94%20%D0%BD%D0%B0%D1%88%20opener%0A%20%20var%20sentOpener%20%3D%20false%3B%0A%20%20try%20%7B%0A%20%20%20%20if%20(window.opener%20%26%26%20window.opener%20!%3D%3D%20window%20%26%26%20!window.opener.closed)%7B%0A%20%20%20%20%20%20window.opener.postMessage(payload%2C%20%22*%22)%3B%0A%20%20%20%20%20%20sentOpener%20%3D%20true%3B%0A%20%20%20%20%7D%0A%20%20%7D%20catch(e)%7B%7D%0A%20%20if%20(sentOpener)%7B%0A%20%20%20%20try%20%7B%20window.close()%3B%20%7D%20catch(e)%7B%7D%0A%20%20%20%20setTimeout(function()%7B%0A%20%20%20%20%20%20try%20%7B%20window.close()%3B%20%7D%20catch(e)%7B%7D%0A%20%20%20%20%20%20alert(%22%E2%9C%93%20%D0%BE%D1%82%D0%BF%D1%80%D0%B0%D0%B2%D0%BB%D0%B5%D0%BD%D0%BE%20%D0%B2%20%D1%84%D0%B8%D0%BB%D1%8C%D1%82%D1%80%22%20%2B%20(c.items.length%20%3F%20%22%3A%20%22%20%2B%20c.items.length%20%2B%20%22%20%D1%80%D0%B5%D0%B7%D1%83%D0%BB%D1%8C%D1%82%D0%B0%D1%82%D0%BE%D0%B2%22%20%3A%20%22%22)%20%2B%0A%20%20%20%20%20%20%20%20(c.ai%20%3F%20%22%20%2B%20%D0%98%D0%98-%D0%BE%D1%82%D0%B2%D0%B5%D1%82%22%20%3A%20%22%22)%20%2B%20%22.%20%D0%95%D1%81%D0%BB%D0%B8%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B0%20%D0%BD%D0%B5%20%D0%B7%D0%B0%D0%BA%D1%80%D1%8B%D0%BB%D0%B0%D1%81%D1%8C%20%E2%80%94%20%D0%B7%D0%B0%D0%BA%D1%80%D0%BE%D0%B9%20%D0%B5%D1%91%2C%20%D0%B2%D1%81%D1%91%20%D1%83%D0%B6%D0%B5%20%D1%83%D1%88%D0%BB%D0%BE.%22)%3B%0A%20%20%20%20%7D%2C%20400)%3B%0A%20%20%20%20return%3B%0A%20%20%7D%0A%0A%20%20%2F%2F%20%D1%83%D0%BD%D0%B8%D0%B2%D0%B5%D1%80%D1%81%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B9%20%D1%80%D0%B5%D0%BB%D0%B5%D0%B9%3A%20%D0%B2%D0%BA%D0%BB%D0%B0%D0%B4%D0%BA%D0%B0%20%D0%B2%D0%BE%D0%B7%D0%B2%D1%80%D0%B0%D1%89%D0%B0%D0%B5%D1%82%D1%81%D1%8F%20%D0%BD%D0%B0%20%D1%81%D0%B0%D0%B9%D1%82%20%D1%81%20%D0%B4%D0%B0%D0%BD%D0%BD%D1%8B%D0%BC%D0%B8%20%D0%B2%20%D0%B0%D0%B4%D1%80%D0%B5%D1%81%D0%B5%0A%20%20location.replace(%22https%3A%2F%2Fjudgedikirsanov-dotcom.github.io%2Fyou.market%2F%23fsRelay%3D%22%20%2B%20b64url(JSON.stringify(payload)))%3B%0A%7D)()%3B%0A" draggable="true">📨 в фильтр товаров</a>
+          <div class="bm-note">потом на любой странице выдачи — один клик по этой закладке: окно само отправит
+          результаты и ИИ-ответ на главную страницу и закроется. Если окно открыл вручную — закладка положит выдачу
+          в буфер, вернись и нажми <kbd>Ctrl+V</kbd>. На телефоне: открой закладку из меню закладок.</div></li>
+      <li><b>или пользовательский скрипт</b> (Firefox/Chrome) — тогда <b>ноль кликов</b> для окон,
+          открытых сайтом: они отчитываются и закрываются сами. Поставь
+          <a href="https://addons.mozilla.org/firefox/addon/violentmonkey/" target="_blank" rel="noopener noreferrer">Violentmonkey</a>
+          (или Tampermonkey) → открой <a id="userjsLink" href="filter-search.user.js">filter-search.user.js</a> → «установить».
+          <b>v2.3 «тихий»</b>: твой обычный поиск из адресной строки скрипт <b>не перехватывает</b> —
+          авто-режим только у окон с маркером сайта (&amp;fsx=1); на прочих вкладках поисковиков —
+          просто маленькая кнопка «📨 в фильтр» в углу и Alt+S, если сам захочешь отправить.</li>
+      <li><b>или расширение-мост</b> — самая надёжная альтернатива менеджеру юзерскриптов:
+          оно знает СВОИ вкладки по <kbd>tabId</kbd> и трогает только их — обычные поиски из адресной
+          строки расширение не читает и не трогает вовсе. Папка <b>filter-search-ext</b> в архиве:
+          Chrome/Edge — <kbd>chrome://extensions</kbd> → «режим разработчика» → «загрузить распакованное»
+          (работает постоянно); Firefox — <kbd>about:debugging</kbd> → «этот Firefox» → «Загрузить
+          временный модуль» → <b>manifest.firefox.json</b> (до перезапуска браузера; постоянно — только
+          после подписи AMO, поэтому в Firefox проще скрипт v2.3 из пункта выше).</li>
+    </ol>
+  </div>
+
+  <form class="searchbar" id="f" onsubmit="return false">
+    <input id="q" placeholder="что ищем? например: sava a7l carbon road bike — или «детский велосипед»" autocomplete="off" autofocus>
+    <button id="goAuto" type="button">искать</button>
+    <button id="reset" type="button" class="ghost">сброс</button>
+    <div class="sugg" id="sugg" hidden></div>
+  </form>
+
+  <div class="courier" id="courier" hidden></div>
+  <div class="chips" id="chips" hidden></div>
+
+  <div class="dropzone" id="dz">
+    <div class="small">резервный канал: выдачу можно просто вставить сюда (<kbd>Ctrl+A</kbd> на вкладке →
+         <kbd>Ctrl+C</kbd> → <kbd>Ctrl+V</kbd>; JSON от закладки вставляется тоже) или перетащить файл
+         (<kbd>Ctrl+S</kbd>), или <label class="linklike">выбери файл<input type="file" id="file" accept=".html,.htm,.xml,.txt" multiple hidden></label>.
+         Каждый новый источник — итог пересчитывается сразу.</div>
+    <div class="grabrow">
+      <button id="grabClip" type="button">📥 забрать выдачу из буфера</button>
+      <span class="small">если закладка положила выдачу в буфер (вкладка была открыта вручную)</span>
+    </div>
+    <div class="small" id="pasteHint" style="margin-top:8px"></div>
+  </div>
+
+  <div class="prog" id="prog" hidden></div>
+  <div class="stats" id="stats"></div>
+  <div id="out"></div>
+  <details id="hidbox" hidden><summary id="hidsum"></summary><div id="hid"></div></details>
+
+  <div class="toolbar">
+    <button id="finishNow">собрать итог из того, что уже есть</button>
+    <button id="expJson">экспорт JSON</button>
+    <button id="expCsv">экспорт CSV</button>
+  </div>
+
+  <div class="howto">
+    <b>как это работает после «искать»</b>
+    <ol>
+      <li>страница открывает <b>окна каскадом</b> (друг под другом) — Google, Яндекс, Bing,
+          DuckDuckGo <b>и Ozon, Avito, AliExpress — оттуда цены в рублях</b> (плюс кнопки для
+          Brave/Mojeek/Marginalia в чипах), и последним — <b>окно поиска с анимацией</b>:
+          оно перекрывает всю стопку и показывает живой прогресс;</li>
+      <li>в каждом окне выдача разбирается прямо на месте — со скриптом (пункт 2 настройки) без единого
+          клика, без него — один клик по закладке «📨 в фильтр»: результаты, ИИ-ответ (AI Overview у
+          Google, Нейро у Яндекса, Copilot у Bing) и <b>цены</b> летят сюда через postMessage или
+          «вкладку-почтальона»;</li>
+      <li>окно-анимация загорается чипами источников по мере поступления и <b>закрывается само</b>,
+          когда итог собран; окна поисковиков тоже стараются закрыться сами — если браузер не даёт
+          странице закрыть себя после перехода с поисковика, останется окно «✓ передано» — просто
+          закрой его <kbd>Ctrl+W</kbd>, данные уже на главной странице;</li>
+      <li>две выдачи → итог собирается сам и выглядит как в каталогах: <b>один товар — одна строка</b>,
+          слева название, справа — источники с ценами (цены маркетплейсов — реальная цена карточки;
+          цены, вынутые из текста выдачи, помечены «≈»); перекрёстные подтверждения и медиана рынка
+          считаются между строками;</li>
+      <li>фильтр скрывает подделки, «Case for X», чужие модели и подозрительные цены — и объясняет
+          каждое скрытие; ИИ-ответы поисковиков показываются отдельной сводкой сверху — как
+          справка, в медиану они не входят.</li>
+    </ol>
+    <div class="manual"><button id="go" type="button">ручной режим: «разобрать» без открытия окон</button></div>
+  </div>
+
+  <div class="log" id="log" hidden></div>
+
+  <footer>стадии: ① запрос и перевод → ② твои окна поисковиков (выдача + ИИ-ответы) → ③ сравнение выдач →
+          ④ карточки товаров → ⑤ магазины напрямую (твой IP) → ⑥ фильтр и итог. Всё считается в твоём
+          браузере от твоего лица; страница работает даже из файла (file://); iframe нет, серверов и
+          прокси нет — антибот поисковиков видит обычного тебя.</footer>
+</main>
+<div id="workerDash" hidden>
+  <div class="wdone" id="wdone">✓</div>
+  <div class="wmag" id="wmag">🔍</div>
+  <div class="wq" id="wq"></div>
+  <div class="wchips" id="wchips"></div>
+  <div class="wstate" id="wstate">открываю поисковики…</div>
+</div>
+<script src="bridge-lib.js?v=15"></script>
+<script src="filter-core.js?v=15"></script>
+<script src="core.js?v=15"></script>
+<script src="app.js?v=15"></script>
+<script>
+  // ссылки на скрипт-мост: абсолютные — чтобы работали и с file://
+  (function(){
+    var a = document.getElementById("userjsLink");
+    if (a && location.protocol === "file:")
+      a.href = "https://judgedikirsanov-dotcom.github.io/you.market/filter-search.user.js";
+  })();
+</script>
+<script>
+  // ---- окно-анимация (#fsWorker) -------------------------------------------
+  // Открывается ПОСЛЕДНИМ при поиске и перекрывает стопку окон поисковиков.
+  // Живой прогресс — по BroadcastChannel (тот же payload-поток, что слушает
+  // главная страница). На «готово» (≥2 источника или сигнал fsWorkerDone от
+  // главной страницы) доигрывает анимацию и закрывается само: это same-origin
+  // popup, открытый нашим window.open — браузеры разрешают close().
+  (function(){
+    if (location.hash.indexOf("fsWorker") < 0) return;
+    document.body.classList.add("worker-mode");
+    var dash = document.getElementById("workerDash");
+    dash.hidden = false;
+    var q = "";
+    try { q = new URLSearchParams(location.search).get("q") || ""; } catch(e){}
+    document.getElementById("wq").textContent = q ? "ищу: " + q : "поиск";
+
+    var NAMES = { google: "Google", yandex: "Яндекс", bing: "Bing", ddg: "DuckDuckGo",
+                  ozon: "Ozon", avito: "Avito", ali: "AliExpress",
+                  brave: "Brave", mojeek: "Mojeek", marginalia: "Marginalia" };
+    var seen = {}, closed = false;
+    function chipsRender(){
+      var html = "";
+      Object.keys(NAMES).forEach(function(id){
+        var on = seen[id];
+        html += "<span class='wchip" + (on ? " on" : "") + "'>" + NAMES[id] +
+                (on ? " ✓ " + on : "") + "</span>";
+      });
+      document.getElementById("wchips").innerHTML = html;
+    }
+    chipsRender();
+    function sourcesCount(){
+      var n = 0;
+      Object.keys(seen).forEach(function(k){ if (seen[k] > 0) n++; });
+      return n;
+    }
+    function finish(msg){
+      if (closed) return;
+      closed = true;
+      document.getElementById("wmag").style.display = "none";
+      document.getElementById("wdone").classList.add("show");
+      document.getElementById("wstate").textContent = msg;
+      setTimeout(function(){ try { window.close(); } catch(e){} }, 900);
+      setTimeout(function(){
+        try { window.close(); } catch(e){}
+        if (window.closed) return;
+        document.getElementById("wstate").textContent =
+          "✓ готово — итог на главной странице; это окно можно закрыть (Ctrl+W)";
+      }, 2400);
+    }
+    if ("BroadcastChannel" in window){
+      var ch = new BroadcastChannel("fs-relay");
+      ch.onmessage = function(ev){
+        var p = ev.data;
+        if (!p || typeof p !== "object") return;
+        if (p.fsBridge === 1 && p.src && NAMES[p.src]){
+          seen[p.src] = (seen[p.src] || 0) + (Array.isArray(p.items) ? p.items.length : 1);
+          chipsRender();
+          if (!closed){
+            var n = sourcesCount();
+            document.getElementById("wstate").textContent = n < 2 ?
+              "принято источников: " + n + " из 2 — жду ещё…" :
+              "источников: " + n + " — собираю итог на главной странице…";
+          }
+        }
+        if (p.fsWorkerDone === 1){
+          finish("готово — итог собран" + (p.srcs ? " из " + p.srcs + " источника(ов)" : "") +
+                 " и ждёт на главной странице. Закрываю это окно…");
+        }
+      };
+    } else {
+      document.getElementById("wstate").textContent =
+        "этот браузер не умеет BroadcastChannel — прогресс смотрите на главной странице";
+    }
+    // окно может открыться раньше первых отчётов: мягкий таймер-подсказка
+    setTimeout(function(){
+      if (!closed && !sourcesCount())
+        document.getElementById("wstate").textContent =
+          "жду выдачу… окна поисковиков отчитаются сами (скрипт) — или нажми в каждом закладку «📨 в фильтр»";
+    }, 6000);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Честный фильтр выдачи — мост",
+  "version": "1.0",
+  "description": "Мост для сайта «честный поиск товаров»: открывает вкладки выдачи с запросом сайта, принимает от них отчёты и закрывает ТОЛЬКО свои вкладки. Обычные поиски пользователя расширение не читает и не трогает.",
+  "permissions": ["tabs"],
+  "background": { "scripts": ["bg.js"] },
+  "browser_specific_settings": {
+    "gecko": { "id": "fs-bridge@filter-search.web", "strict_min_version": "115.0" }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://judgedikirsanov-dotcom.github.io/you.market/*"],
+      "js": ["content-site.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.google.com/search*",
+        "https://www.google.*/search*",
+        "https://yandex.ru/search*",
+        "https://yandex.*/search/*",
+        "https://www.bing.com/search*",
+        "https://duckduckgo.com/?q=*",
+        "https://duckduckgo.com/html/?q=*",
+        "https://lite.duckduckgo.com/lite/?q=*",
+        "https://search.brave.com/search?q=*",
+        "https://www.mojeek.com/search?q=*",
+        "https://marginalia-search.com/search*",
+        "https://www.ozon.ru/search/*",
+        "https://www.avito.ru/all*",
+        "https://aliexpress.ru/wholesale*"
+      ],
+      "js": ["bridge-lib.js", "content-serp.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+name: publish-web
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: node apps/web/tests/web_tests.js
+      - run: node tools/test_bridge_lib.js
+      - run: node tools/build_bookmarklet.js
+      - name: Собрать папку сайта
+        run: |
+          mkdir -p dist/filter-search-ext
+          cp apps/web/index.html apps/web/core.js apps/web/filter-core.js apps/web/app.js \
+             apps/web/bridge-lib.js apps/web/filter-search.user.js dist/
+          cp apps/ext/* dist/filter-search-ext/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+      - uses: actions/deploy-pages@v5
+      - run: sleep 15 && curl -fsS -o /dev/null -w '%{http_code}\n' https://judgedikirsanov-dotcom.github.io/you.market/
