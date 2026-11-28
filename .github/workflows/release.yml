@@ -1,0 +1,89 @@
+# ============================================================================
+# release — выпуск по метке. Метка vX.Y.Z, поставленная на вершину main,
+# запускает: проверки → сборку папки выпуска → аттестат сборки → релиз GitHub
+# с файлами и заметками. Порядок выпуска — в apps/web/README.md, раздел
+# «Как выпустить версию».
+#
+# Запуск от руки (workflow_dispatch) с именем метки повторяет выпуск той же
+# метки сценарием из main — так чинится сценарий, не передвигая метку: запуск
+# по метке всегда исполняет файл сценария из коммита самой метки.
+#
+# Права встроенного токена (отдельный секрет не нужен):
+#   contents           — создать релиз и загрузить файлы;
+#   id-token, attestations, artifact-metadata — аттестат сборки (actions/attest).
+# ============================================================================
+name: release
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Метка выпуска (vX.Y.Z) — повторить выпуск этой метки сценарием из main"
+        required: true
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0        # история и метки — для ссылки «что изменилось с прошлого выпуска»
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # те же проверки, что и в checks
+      - run: node apps/web/tests/web_tests.js
+      - run: node apps/web/tests/planner_tests.js
+      - run: node apps/web/tests/shuttle_tests.js
+      - run: node tools/test_bridge_lib.js
+      - run: node tools/build_bookmarklet.js --check
+      - run: node tools/check_versions.js
+      - name: Метка совпадает с version.json
+        run: node tools/check_versions.js --tag "$TAG"
+      - name: Метка стоит на вершине main
+        run: |
+          git fetch origin main
+          test "$(git rev-parse "$TAG^{commit}")" = "$(git rev-parse FETCH_HEAD)" || {
+            echo "::error::метка $TAG стоит не на вершине main — выпуск остановлен"
+            exit 1
+          }
+      - name: Тесты сборщика выпуска
+        run: node tools/test_release_dist.js
+      - name: Собрать папку выпуска
+        run: node tools/make_release_dist.js
+      - name: Сборка воспроизводима, архив цел
+        run: |
+          node tools/make_release_dist.js --check
+          unzip -tq dist/filter-search-ext.zip
+      - name: Аттестат сборки
+        uses: actions/attest@v4
+        with:
+          subject-path: "dist/*"
+      - name: Заметки о выпуске
+        run: |
+          node tools/release_notes.js --tag "$TAG" > body.md
+          node tools/release_notes.js --tag "$TAG" --title > title.txt
+      - name: Релиз с файлами
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # повторный запуск сценария: файлы заменяются, заметки обновляются
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "$(cat title.txt)" --notes-file body.md --draft=false --latest
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "$(cat title.txt)" --notes-file body.md --latest
+          fi
+      - name: Итог
+        run: |
+          gh release view "$TAG" --json url,isDraft,isPrerelease,assets \
+            --jq '"релиз: \(.url)", "черновик: \(.isDraft), предвыпуск: \(.isPrerelease)", "файлы: \([.assets[].name] | sort | join(", "))"'

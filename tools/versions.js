@@ -23,6 +23,10 @@ const FILES = {
   bookmarklet: path.join(WEB, "bookmarklet.js")
 };
 const SITE = "https://judgedikirsanov-dotcom.github.io/you.market/";
+// релизы: адрес репозитория и постоянные ссылки на файлы последнего выпуска
+// (releases/latest/download/<имя> всегда отдаёт последний нечерновой выпуск)
+const REPO = "judgedikirsanov-dotcom/you.market";
+const RELEASES = "https://github.com/" + REPO + "/releases";
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 
 function readVersion(){
@@ -80,6 +84,6 @@ function firstDiff(a, b){
   return "";
 }
 
-module.exports = { ROOT: ROOT, WEB: WEB, FILES: FILES, SITE: SITE, VERSION_RE: VERSION_RE,
-                   readVersion: readVersion, stampHtml: stampHtml, stampUserjs: stampUserjs,
-                   stampManifest: stampManifest, firstDiff: firstDiff };
+module.exports = { ROOT: ROOT, WEB: WEB, FILES: FILES, SITE: SITE, REPO: REPO, RELEASES: RELEASES,
+                   VERSION_RE: VERSION_RE, readVersion: readVersion, stampHtml: stampHtml,
+                   stampUserjs: stampUserjs, stampManifest: stampManifest, firstDiff: firstDiff };

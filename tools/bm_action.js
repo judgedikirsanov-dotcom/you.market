@@ -1,13 +1,16 @@
 // Действие букмарклета: работает ПОСЛЕ inline bridge-lib.js (window.FSBridge готов).
 // Клик на закладке «📨 в фильтр товаров» на странице выдачи:
 //   1) парсим выдачу + ИИ-ответ прямо в контексте страницы (наши парсеры);
-//   2) если вкладку открыл наш сайт и связь не разорвана (opener жив) —
-//      window.opener.postMessage и window.close();
-//   3) иначе (Google/Яндекс/Bing рвут opener через COOP) — универсальный
-//      «вкладка-почтальон»: навигируем вкладку на сайт агрегатора с данными
-//      в адресе (#fsRelay=…); страница-релей на нашем origin передаёт payload
-//      агрегатору через BroadcastChannel и закрывается сама. COOP этому не
-//      мешает: запрет касается связи с чужим origin, а не навигации.
+//   2) «вкладка-почтальон»: навигируем вкладку на сайт агрегатора с данными в
+//      адресе (#fsRelay=…); страница-релей на нашем origin передаёт payload
+//      агрегатору через BroadcastChannel. Дальше релей решает сам:
+//      • обычное окно или вкладка — закрывается (или показывает «можно закрыть»);
+//      • вкладка «Шаттла» — ведёт ту же вкладку к следующему источнику очереди
+//        и после последнего закрывается.
+//   Быстрый путь через window.opener не используется: во «Шаттле» вкладка обязана
+//   дойти до релея, а сайт источника мог переписать адрес и потерять маркер —
+//   релей узнаёт шаттл по копии очереди в хранилище вкладки, а не по адресу.
+//   COOP (Google/Яндекс/Bing рвут opener) навигации и BroadcastChannel не мешает.
 (function(){
   var FB = (typeof FSBridge !== "undefined") ? FSBridge : (window && window.FSBridge);
   if (!FB || typeof FB.collect !== "function"){ alert("мост не собрался — переустанови закладку"); return; }
@@ -21,29 +24,11 @@
   }
   var payload = FB.buildPayload(c);
 
-  function b64url(s){
-    return btoa(unescape(encodeURIComponent(s)))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  }
+  // маркер «Шаттла» в адресе источника (ставит агрегатор, apps/web/shuttle.js)
+  var shuttle = /[?&]fsh=1(?=&|#|$)/.test(location.search);
 
-  // быстрая связь: агрегатор — наш opener
-  var sentOpener = false;
-  try {
-    if (window.opener && window.opener !== window && !window.opener.closed){
-      window.opener.postMessage(payload, "*");
-      sentOpener = true;
-    }
-  } catch(e){}
-  if (sentOpener){
-    try { window.close(); } catch(e){}
-    setTimeout(function(){
-      try { window.close(); } catch(e){}
-      alert("✓ отправлено в фильтр" + (c.items.length ? ": " + c.items.length + " результатов" : "") +
-        (c.ai ? " + ИИ-ответ" : "") + ". Если вкладка не закрылась — закрой её, всё уже ушло.");
-    }, 400);
-    return;
-  }
-
-  // универсальный релей: вкладка возвращается на сайт с данными в адресе
-  location.replace("https://judgedikirsanov-dotcom.github.io/you.market/#fsRelay=" + b64url(JSON.stringify(payload)));
+  // релей: вкладка возвращается на сайт с данными в адресе. Лимит адреса
+  // движка — в bridge-lib (relayHash): не влезшая страница режется с пометкой htmlCut
+  location.replace("https://judgedikirsanov-dotcom.github.io/you.market/" +
+    FB.relayHash(payload, shuttle).hash);
 })();

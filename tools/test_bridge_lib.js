@@ -1,4 +1,5 @@
-// Тесты моста (bridge-lib.js): парсеры, ИИ-экстракция, payload, валидация.
+// Тесты моста (bridge-lib.js): парсеры, ИИ-экстракция, payload, валидация,
+// адрес релея с лимитом длины (relayHash).
 // Запуск: node tools/test_bridge_lib.js
 const path = require("path");
 const FB = require(path.join(__dirname, "..", "apps", "web", "bridge-lib.js"));
@@ -61,6 +62,50 @@ check("detectSrcFromHost: google.de → google", FB.detectSrcFromHost("www.googl
 check("detectSrcFromHost: ya.ru → yandex", FB.detectSrcFromHost("ya.ru") === "yandex");
 check("detectSrcFromHost: evil → null", FB.detectSrcFromHost("evil.example.com") === null);
 check("detectQueryFromSearch: text= → yandex", FB.detectQueryFromSearch("?text=детский+велосипед") === "детский велосипед");
+
+// ---- адрес релея: данные в «#», лимит длины адреса движка -----------------------
+// расшифровка «#fsRelay=…» — как на странице-релее (app.js b64urlToUtf8)
+function decodeHash(h){
+  const m = /^#fsRelay=([A-Za-z0-9_-]+)(&fsh=1)?$/.exec(h);
+  return m ? { p: JSON.parse(Buffer.from(m[1], "base64url").toString("utf8")), fsh: !!m[2] } : null;
+}
+let rh = FB.relayHash(emptyPayload, false);
+let dh = decodeHash(rh.hash);
+check("relayHash: короткий payload едет целиком, без обрезки",
+      rh.cut === 0 && dh && dh.p.html === emptyPayload.html && dh.p.src === "ddg" && dh.fsh === false, rh.hash.slice(0, 40));
+rh = FB.relayHash(emptyPayload, true);
+dh = decodeHash(rh.hash);
+check("relayHash: маркер шаттла → &fsh=1 в адресе", dh && dh.fsh === true && rh.hash.slice(-6) === "&fsh=1");
+// страница целиком 1,5 млн знаков (ASCII): адрес без лимита был бы ~2,1 млн символов —
+// Firefox такой не довозит; с лимитом — влезает, хвост отрезан и помечен
+const bigHtml = "<html><body>" + "x".repeat(1500000) + "</body></html>";
+const bigP = FB.buildPayload({ src: "ozon", q: "sava a7l", items: [], ai: null, html: bigHtml });
+const naive = "#fsRelay=" + FB.b64url(JSON.stringify(bigP));
+rh = FB.relayHash(bigP, false);
+dh = decodeHash(rh.hash);
+check("relayHash: без лимита адрес был бы длиннее предела Firefox 1 048 576 — " + naive.length, naive.length > 1048576);
+check("relayHash: страница 1,5 млн знаков — адрес в лимите " + FB.RELAY_MAX_URL, rh.hash.length <= FB.RELAY_MAX_URL, rh.hash.length);
+check("relayHash: лимит используется, а не половина (запас < 2 %)", rh.hash.length >= FB.RELAY_MAX_URL * 0.98, rh.hash.length);
+check("relayHash: обрезка помечена htmlCut, длина сходится",
+      rh.cut > 0 && dh && dh.p.htmlCut === 1500000 && dh.p.html.length === 1500000 - rh.cut,
+      "cut=" + rh.cut + ", html=" + (dh && dh.p.html.length));
+check("relayHash: обрезка — это начало страницы, остальные поля целы",
+      dh && dh.p.html === bigHtml.slice(0, dh.p.html.length) && dh.p.src === "ozon" && dh.p.fsBridge === 1 &&
+      Array.isArray(dh.p.items) && dh.p.items.length === 0 && FB.validatePayload(dh.p));
+// кириллица: 2 байта на знак — адрес растёт быстрее, лимит всё равно держится
+const ruHtml = "<p>Велосипед SAVA A7L карбон — цена</p>".repeat(60000);   // 2,3 млн знаков → buildPayload режет до 1,5 млн
+const ruP = FB.buildPayload({ src: "avito", q: "sava", items: [], ai: null, html: ruHtml });
+rh = FB.relayHash(ruP, true);
+dh = decodeHash(rh.hash);
+check("relayHash: кириллица (страница 1,5 млн знаков) — адрес в лимите, &fsh=1 сохранён",
+      rh.hash.length <= FB.RELAY_MAX_URL && dh && dh.fsh === true && dh.p.htmlCut === ruP.html.length &&
+      ruP.html.length === 1500000, rh.hash.length + "/" + FB.RELAY_MAX_URL);
+// резать нечего (нет html) — отдаём как есть; такие payload всегда маленькие
+const noHtml = FB.buildPayload({ src: "google", q: "x", items: [{ title: "t", url: "https://a.b/1" }], ai: null, html: "" });
+check("relayHash: без html ничего не режется", FB.relayHash(noHtml, false).cut === 0);
+// релей на странице расшифровывает то же, что сложил мост
+check("relayHash: кавычки, обратный слэш, переносы и эмодзи проходят туда-обратно",
+      decodeHash(FB.relayHash({ a: 'q"uote \\ <b>&amp;</b> ✓ 😀', s: "строка\nвторая" }, false).hash).p.a === 'q"uote \\ <b>&amp;</b> ✓ 😀');
 
 // ---- реальный HTML от Bing через прокси (сохранён ранее, если жив) ---------------
 try {

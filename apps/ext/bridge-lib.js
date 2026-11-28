@@ -12,11 +12,14 @@
 // Философия: мы не конкуренты поисковикам, мы их продвинутые пользователи.
 // Всё выполняется В БРАУЗЕРЕ ПОЛЬЗОВАТЕЛЯ от его лица: его IP, его куки,
 // его вкладки. Никаких серверов и прокси. Выдача попадает на страницу
-// агрегатора через window.opener.postMessage (единственный легальный мост
-// между вкладками разных origin) или через буфер обмена пользователя.
+// агрегатора «вкладкой-почтальоном»: вкладка выдачи навигируется на наш сайт с
+// данными в адресе (#fsRelay=…, см. relayHash), страница-релей передаёт их
+// агрегатору через BroadcastChannel. Запасные пути — window.opener.postMessage
+// (пока сайт источника не порвал opener через COOP) и буфер обмена.
 //
 // Payload: {fsBridge:1, v:2, src, q, ts, host, items:[{title,url,snippet}...],
-//           ai:{src,text}|null, html?:строка (только если парсер не распознал)}
+//           ai:{src,text}|null, html?:строка (только если парсер не распознал),
+//           htmlCut?:исходная длина html (страницу обрезали, чтобы влез в адрес)}
 // ============================================================================
 (function(root){
 "use strict";
@@ -410,6 +413,48 @@ function buildPayload(c){
   if (!p.items.length) p.html = String(c.html || "").slice(0, 1500000);
   return p;
 }
+
+// ----------------------------------------------------------------------------
+// «#» страницы-релея: данные выдачи едут в адресе, а адрес ограничен движком —
+// Chromium довозит 2 097 152 символов, Firefox 1 048 576, длиннее навигация
+// молча не доходит (измерено в обоих). Режем до RELAY_MAX_URL только html —
+// страницу целиком, которую парсеры на месте не распознали; htmlCut = исходная
+// длина, агрегатор предупреждает. Скрипт-мост и расширение площадки парсят на
+// месте, html в их payload не бывает.
+// → { hash: "#fsRelay=…[&fsh=1]", cut: сколько знаков html отрезано }
+// ----------------------------------------------------------------------------
+var RELAY_MAX_URL = 900000;
+function b64url(s){
+  return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function relayHash(payload, shuttle){
+  var tail = shuttle ? "&fsh=1" : "";
+  function enc(p){ return "#fsRelay=" + b64url(JSON.stringify(p)) + tail; }
+  var html = (payload && typeof payload.html === "string") ? payload.html : null;
+  var full = { keep: html ? html.length : 0, len: enc(payload).length };
+  if (full.len <= RELAY_MAX_URL || !html) return { hash: enc(payload), cut: 0 };
+  function withHtml(n){          // копия payload с html до n знаков
+    var p = {};
+    for (var k in payload) p[k] = payload[k];
+    p.html = html.slice(0, n); p.htmlCut = html.length;
+    return { keep: n, hash: enc(p), len: 0 };
+  }
+  // длина адреса линейна по длине html: от пропорциональной оценки — секущей
+  // к цели (99,7 % лимита); best — лучший влезший вариант
+  var goal = RELAY_MAX_URL * 0.997, best = null, pt;
+  var keep = Math.floor(html.length * RELAY_MAX_URL / full.len);
+  for (var i = 0; i < 8 && keep > 0 && keep < html.length; i++){
+    pt = withHtml(keep); pt.len = pt.hash.length;
+    if (pt.len <= RELAY_MAX_URL){ best = pt; if (pt.len >= goal) break; }
+    keep = Math.floor(pt.keep + (goal - pt.len) * (pt.keep - full.keep) / (pt.len - full.len));
+  }
+  if (best) return { hash: best.hash, cut: html.length - best.keep };
+  // не влезло и так (не бывает) — без html: адрес дойдёт, агрегатор скажет «не распознано»
+  var bare = {};
+  for (var j in payload) bare[j] = payload[j];
+  delete bare.html; bare.htmlCut = html.length;
+  return { hash: enc(bare), cut: html.length };
+}
 // фолбэк-копирование в буфер (когда navigator.clipboard недоступен)
 function legacyCopy(text){
   var ta = document.createElement("textarea");
@@ -443,7 +488,8 @@ var api = {
   detectSrcFromHost: detectSrcFromHost, detectQueryFromSearch: detectQueryFromSearch,
   collect: collect, buildPayload: buildPayload, legacyCopy: legacyCopy,
   priceFromText: priceFromText, priceOfItem: priceOfItem,
-  validatePayload: validatePayload
+  validatePayload: validatePayload, b64url: b64url, relayHash: relayHash,
+  RELAY_MAX_URL: RELAY_MAX_URL
 };
 
 if (typeof module !== "undefined" && module.exports) module.exports = api;

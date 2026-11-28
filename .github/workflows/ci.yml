@@ -13,8 +13,16 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # тесты продукта
       - run: node apps/web/tests/web_tests.js
       - run: node apps/web/tests/planner_tests.js
+      - run: node apps/web/tests/shuttle_tests.js
       - run: node tools/test_bridge_lib.js
+      # сборка и версии: закладка собрана, номер один во всех частях
       - run: node tools/build_bookmarklet.js --check
       - run: node tools/check_versions.js
+      # выпуск (шаг 5): папка dist/ собирается, воспроизводится и описывается
+      - run: node tools/test_release_dist.js
+      - run: node tools/make_release_dist.js
+      - run: node tools/make_release_dist.js --check
+      - run: node tools/release_notes.js > /dev/null

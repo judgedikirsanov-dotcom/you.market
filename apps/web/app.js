@@ -7,20 +7,33 @@
 // IP капчилась бы как спамботная, а здесь антибот видит живого человека.
 //
 // Конвейер после «искать» (без iframe):
-//   ① страница открывает popup-окна поисковиков каскадом «друг под другом»
-//     (Google, Яндекс — русский запрос, Bing, DDG) и последним — окно-анимацию
-//     (#fsWorker): оно перекрывает всю стопку и показывает живой прогресс;
-//   ② в каждом окне выдача исследуется прямо на месте — букмарклетом
-//     (один клик по закладке «📨 в фильтр», работает в любом браузере) или
-//     пользовательским скриптом (Violentmonkey — сам, ноль кликов);
-//     парсеры вынимают результаты И ИИ-ответы поисковика (AI Overview /
-//     Нейро / Copilot / Brave AI);
-//   ③ данные летят на наш сайт через window.opener.postMessage (если opener
-//     жив) или через «вкладку-почтальон»: окно навигируется на наш сайт с
-//     данными в адресе (#fsRelay), передаёт их агрегатору по BroadcastChannel
-//     (тот же origin) и закрывается; если браузер не даёт закрыть — честно
-//     показывает «Ctrl+W». Окно-анимация на «готово» закрывается само;
+//   ① планировщик выбирает 3–4 источника под намерение; страница выбирает
+//     канал сбора и открывает источники: по умолчанию — ОДНУ вкладку «Шаттл»
+//     с очередью источников (shuttle.js; запасной режим окон — каскад «друг
+//     под другом» и последним окно-анимация #fsWorker с живым прогрессом);
+//   ② в каждой вкладке выдача разбирается прямо на месте — букмарклетом
+//     (один клик по закладке «📨 в фильтр товаров», работает в любом браузере),
+//     пользовательским скриптом (Violentmonkey — сам, ноль кликов) или
+//     расширением-мостом (свои вкладки идут «под капотом»); парсеры вынимают
+//     результаты И ИИ-ответы поисковика (AI Overview / Нейро / Copilot /
+//     Brave AI);
+//   ③ данные летят на наш сайт через «страницу-релей»: вкладка навигируется
+//     на наш сайт с данными в адресе (#fsRelay), релей передаёт их агрегатору
+//     по BroadcastChannel (тот же origin) и решает, что делать со вкладкой:
+//     вкладку «Шаттла» ведёт к следующему источнику очереди (копия очереди
+//     живёт в sessionStorage самой вкладки), прочую — закрывает; если браузер
+//     не даёт закрыть — честно показывает «Ctrl+W». Расширение-мост отчитывается
+//     напрямую (FS_BRIDGE_*), без вкладок-релеев;
 //   ④ сайт принимает, пересобирает карточки с источниками, считает медиану.
+//
+// Каналы сбора (шаг 8) — пользователь их не настраивает, страница берёт лучший
+// из доступных и показывает выбор в строке статуса:
+//   helper     локальный помощник (этап 3, пока выключен) — кликов нет;
+//   extension  расширение-мост — кликов нет;
+//   shuttle    «Шаттл» (этап 2): одна вкладка идёт по очереди источников,
+//              на каждой выдаче — закладка «📨 в фильтр товаров»; релей ведёт
+//              вкладку к следующему источнику, после последнего закрывает её;
+//   windows    каскад окон (описан выше в ①).
 //
 // Резервные каналы приёма: Ctrl+V (HTML или JSON), файл, кнопка «забрать из
 // буфера» (permission clipboard-read), расширение-мост в Chrome (FS_BRIDGE_*,
@@ -30,6 +43,7 @@
 "use strict";
 (function(){
 var FC = window.FilterCore, FS = window.FSCore, FB = window.FSBridge, FP = window.FSPlanner;
+var Sh = window.FSShuttle || null, Ch = window.FSChannels || null;
 var $ = function(id){ return document.getElementById(id); };
 
 var SERP_IDS = ["google", "yandex", "bing", "ddg", "mojeek", "brave", "marginalia"];
@@ -62,6 +76,12 @@ var state = {
   tabsOpened: false,    // вкладки уже открывали в этом поиске
   lastPayloadTs: 0,     // дедуп отчётов вкладок
   bridge: { ready: false, version: null },   // расширение-мост (Chrome, опционально)
+  channel: "",          // канал сбора текущего поиска: helper | extension | shuttle | windows
+  channelWhy: "",       // почему выбран канал (журнал)
+  helperReady: false,   // локальный помощник ответил (этап 3)
+  userjs: "",           // версия скрипта-моста, если он установлен (маячок fsUserjs)
+  shuttle: null,        // вкладка-шаттл текущего поиска: { sid, done, link? }
+  staleVersion: "",     // на сайте опубликована другая версия, чем эта вкладка
   autos: {}             // id канала -> {state: wait|ok|err, n, msg, blocked}
 };
 
@@ -141,6 +161,17 @@ window.addEventListener("message", function(ev){
   if (ev.origin !== location.origin) return;
   var m = ev.data;
   if (!m || typeof m !== "object") return;
+  // скрипт-мост установлен: на странице сайта он объявляет свою версию —
+  // значит, выдачи отчитаются сами и закладка не нужна
+  if (m.fsUserjs){
+    var uv = String(m.fsUserjs).slice(0, 20);
+    if (state.userjs !== uv){
+      state.userjs = uv;
+      addLog("скрипт-мост установлен (v" + esc(uv) + ") — вкладки отчитываются сами, закладка не нужна");
+      renderStatus();
+    }
+    return;
+  }
   if (m.fsExtReady){
     if (!state.extMode){
       state.extMode = true;
@@ -200,6 +231,11 @@ function acceptBridgePayload(p, origin){
     return;
   }
   addLog("принято от " + esc(engineName(src)) + " (origin " + esc(origin) + ")");
+  if (p.htmlCut)
+    addLog(engineName(src) + ": страница обрезана при передаче (" + String(p.html || "").length +
+      " из " + p.htmlCut + " знаков — лимит адреса браузера): результатов могло стать меньше; " +
+      "скрипт-мост разбирает площадки на месте и передаёт всё целиком", "warn");
+  if (state.shuttle) state.shuttle.link = "";   // шаттл пошёл — ссылка-запаска больше не нужна
   var had = false;
   if (Array.isArray(p.items) && p.items.length){
     absorbItems(src, p.items, "вкладка");
@@ -224,6 +260,8 @@ function acceptBridgePayload(p, origin){
 // агрегатору в другой вкладке через BroadcastChannel (тот же origin — COOP
 // не мешает) и закрывается, если была открыта скриптом. COOP Google/Яндекса/
 // Bing рвёт window.opener, но навигации и BroadcastChannel он не запрещает.
+var RELAY_PAUSE_MS = 900;   // пауза на релее «Шаттла» перед следующим источником
+var relayLost = false;     // вкладка шла с маркером шаттла, а очередь не получила
 function b64urlToUtf8(s){
   s = s.replace(/-/g, "+").replace(/_/g, "/");
   while (s.length % 4) s += "=";
@@ -235,10 +273,38 @@ var relayChannel = ("BroadcastChannel" in window) ? new BroadcastChannel("fs-rel
 if (relayChannel){
   relayChannel.onmessage = function(ev){
     var p = ev.data;
-    if (!p || typeof p !== "object" || p.fsBridge !== 1 || !FB.validatePayload(p)) return;
+    if (!p || typeof p !== "object") return;
+    if (p.fsShuttleDone){ shuttleDone(p.fsShuttleDone); return; }
+    if (p.fsShuttleLost){ shuttleLost(); return; }
+    if (p.fsBridge !== 1 || !FB.validatePayload(p)) return;
     addLog("релей: вкладка-почтальон передала выдачу " + esc(engineName(p.src)));
     acceptBridgePayload(p, "BroadcastChannel");
   };
+}
+// шаттл прошёл всю очередь (сообщение от релея в его вкладке)
+function shuttleDone(msg){
+  if (!state.shuttle || (msg && msg.sid && msg.sid !== state.shuttle.sid)){
+    addLog("шаттл другого поиска прошёл очередь — не мешаю текущему поиску");
+    return;
+  }
+  state.shuttle.done = true;
+  addLog("шаттл: очередь источников пройдена — вкладка закрывается сама");
+  renderStatus();
+  if (state.searching && passSettled()) finishSearch();
+}
+// вкладка шаттла не получила копию очереди (хранилище вкладки недоступно):
+// оставшиеся источники честно становятся кнопками «вкладкой»
+function shuttleLost(){
+  if (!state.shuttle || state.shuttle.done || state.shuttle.lost) return;
+  state.shuttle.lost = true;
+  addLog("шаттл: вкладка не получила очередь — остальные источники открой кнопками в панели", "warn");
+  state.queue.forEach(function(id){
+    if (state.pastedIds.indexOf(id) < 0 && !(state.autos[id] && state.autos[id].state === "err"))
+      state.autos[id] = { state: "err", msg: "шаттл потерял очередь", blocked: true };
+  });
+  renderChips();
+  renderStatus();
+  if (state.searching && passSettled()) finishSearch();
 }
 function handleRelayHash(){
   var m = /(?:^|&)[?]?fsRelay=([A-Za-z0-9_-]+)/.exec(location.hash.slice(1));
@@ -263,6 +329,9 @@ function handleRelayHash(){
   } catch(e){
     addLog("релей: BroadcastChannel не прошёл — " + esc(String(e && e.message || e).slice(0, 80)), "warn");
   }
+  // 1а) «Шаттл»: эта вкладка идёт по очереди источников — отметить источник и
+  // вести вкладку к следующему (или закрыть после последнего)
+  if (shuttleTransit(payload, /(?:^|&)fsh=1(?:&|$)/.test(location.hash.slice(1)))) return;
   // 2) показать здесь же (file:// без агрегатора) — сбой не влияет на передачу
   try {
     if (!state.searching && !state.finalized){
@@ -297,13 +366,94 @@ function handleRelayHash(){
     // браузер всё же не дал (флаг «открыто скриптом» потерялся при COOP-переходе) —
     // честная подсказка вместо тихого зомби-окна
     document.title = "✓ передано — окно можно закрыть (Ctrl+W)";
-    courier(delivered ?
-      "✓ выдача " + esc(srcName) + " передана на вкладку агрегатора. Закрой это окно — <b>Ctrl+W</b> (браузер не позволяет странице закрыть саму себя после перехода с поисковика)" :
-      "выдача показана здесь; окно можно закрыть (Ctrl+W)");
+    var msg = delivered ?
+      "✓ выдача <b>" + esc(srcName) + "</b> передана на вкладку агрегатора" : "выдача показана здесь";
+    if (relayLost && delivered)
+      msg = "✓ выдача <b>" + esc(srcName) + "</b> передана, но очередь «Шаттла» не дошла до этой вкладки" +
+        "<div class='rd-sub'>остальные источники открой кнопками на вкладке агрегатора</div>";
+    if (document.documentElement.classList.contains("relay-mode")){
+      // экран релея: главная страница скрыта (relay-mode) — текст показываем там
+      relayDash(msg + "<div class='rd-sub'>вкладку можно закрыть — <b>Ctrl+W</b></div>");
+    } else {
+      courier(msg + ". Закрой это окно — <b>Ctrl+W</b> (браузер не позволяет странице закрыть саму себя после перехода с поисковика)");
+    }
   }, 800);
 }
 handleRelayHash();
 window.addEventListener("hashchange", handleRelayHash);
+
+// ---- релей-транзит «Шаттла» (этап 2) -------------------------------------------
+// Вкладка-шаттл после закладки попадает сюда. Очередь лежит в sessionStorage
+// этой вкладки (копия открывателя — она остаётся для нашего происхождения при
+// любых переходах на чужие). Отмечаем источник пройденным и ведём вкладку к
+// следующему; после последнего — «готово» и закрытие. Очередь в хранилище и есть
+// признак шаттла: адрес источника сайт мог переписать, а копия — нет.
+// Возвращает true, только если это шаттл с очередью; вкладка без очереди
+// (открыта вручную) — обычный релей, как раньше.
+function relayBar(pr){
+  var pct = pr.total ? Math.round(100 * pr.done / pr.total) : 0;
+  return "<div class='rd-bar' role='progressbar' aria-valuemin='0' aria-valuemax='" + pr.total +
+         "' aria-valuenow='" + pr.done + "'><i style='width:" + pct + "%'></i></div>";
+}
+function relayDash(html){
+  var box = $("relayDash");
+  if (box){ box.innerHTML = html; box.hidden = false; }
+}
+function closeRelayTab(){
+  try { window.close(); } catch(e){}
+  return window.closed;
+}
+function shuttleTransit(payload, flagged){
+  var sh = Sh ? Sh.load() : null;
+  // копия очереди могла остаться в хранилистве вкладки, открытой со страницы
+  // позже (запасная ссылка, кнопки источников): шаттл — только если отчёт
+  // пришёл от источника из этой очереди, иначе вкладка — обычный релей
+  var foreign = !!(sh && !sh.entries.some(function(e){ return e.id === payload.src; }));
+  if (foreign){
+    addLog("релей: очередь в хранилище от другого поиска (в ней нет источника «" +
+      esc(engineName(payload.src)) + "») — вкладка идёт обычным путём", "warn");
+  }
+  if (!sh || foreign){
+    // вкладку открыли как шаттл, а копию очереди она не получила: агрегатор
+    // узнает об этом и отдаст остальные источники кнопками. Чужую очередь
+    // (foreign) потерей не считаем — она не от этого поиска
+    if (flagged && !foreign){
+      addLog("релей: флаг шаттла есть, очереди в хранилище нет — сообщаю агрегатору", "warn");
+      relayLost = true;
+      try { if (relayChannel) relayChannel.postMessage({ fsShuttleLost: 1 }); } catch(e){}
+    }
+    return false;
+  }
+  var srcName = engineName(payload.src);
+  Sh.markDone(sh, payload.src);
+  Sh.save(sh);
+  var pr = Sh.progress(sh);
+  var next = Sh.nextEntry(sh, payload.src);
+  // адрес чистим всегда: обновление вкладки не должно вливать отчёт повторно
+  try { history.replaceState(null, "", location.pathname + location.search); } catch(e){}
+  if (next){
+    addLog("шаттл: " + esc(srcName) + " передан (" + pr.done + " из " + pr.total + ") → " + esc(engineName(next.id)));
+    relayDash("✓ <b>" + esc(srcName) + "</b> передан — " + pr.done + " из " + pr.total +
+      "<div class='rd-sub'>следующий источник: <b>" + esc(engineName(next.id)) + "</b></div>" + relayBar(pr));
+    setTimeout(function(){ location.replace(next.url); }, RELAY_PAUSE_MS);
+    return true;
+  }
+  // последний источник: говорим агрегатору, что очередь пройдена, и закрываемся
+  try { if (relayChannel) relayChannel.postMessage({ fsShuttleDone: { sid: sh.sid } }); } catch(e){}
+  Sh.clear();
+  addLog("шаттл: " + esc(srcName) + " передан — очередь пройдена (" + pr.done + " из " + pr.total + ")");
+  document.title = "✓ готово — вкладку можно закрыть";
+  relayDash("✓ все источники переданы (" + pr.done + " из " + pr.total + ")" +
+    "<div class='rd-sub'>итог — на вкладке «честный поиск товаров»; эта вкладка закроется сама</div>" + relayBar(pr));
+  setTimeout(closeRelayTab, 300);
+  setTimeout(function(){
+    if (closeRelayTab()) return;
+    // браузер не дал (вкладку открыли вручную) — честная подсказка
+    relayDash("✓ все источники переданы (" + pr.done + " из " + pr.total + ")" +
+      "<div class='rd-sub'>итог — на вкладке «честный поиск товаров». Вкладку можно закрыть — <b>Ctrl+W</b></div>" + relayBar(pr));
+  }, 1600);
+  return true;
+}
 
 // ИИ-ответ поисковика — отдельная сводка в технической панели, в карточки
 // товаров не попадает
@@ -332,6 +482,7 @@ function updatePanelSummary(){
   var s = $("techSum");
   if (!s) return;
   var parts = [];
+  if (state.staleVersion) parts.push("вышла версия " + state.staleVersion + " — обновите страницу");
   if (state.aiAnswers.length) parts.push("ИИ-ответы: " + state.aiAnswers.length);
   if (state.lastFilter && state.lastFilter.hidden.length) parts.push("скрыто с причинами: " + state.lastFilter.hidden.length);
   s.textContent = parts.length ? "· " + parts.join(" · ") : "";
@@ -421,7 +572,8 @@ function renderChips(){
     }
     var a = state.autos[id + ":bridge"] || state.autos[id];
     if (a && a.state === "wait"){
-      var via = state.autos[id + ":bridge"] ? " — под капотом (мост)…" : " — жду окно…";
+      var via = state.autos[id + ":bridge"] ? " — под капотом (мост)…" :
+                (state.channel === "shuttle" ? " — шаттл ждёт закладку…" : " — жду окно…");
       html += "<span class='chip wait'>" + esc(engineName(id) + via) + "</span>";
       return;
     }
@@ -467,6 +619,7 @@ function renderStatus(){
     var got = state.queue.filter(function(id){ return state.pastedIds.indexOf(id) >= 0; }).length;
     parts.push("ищу <b>" + esc(state.query) + "</b>: пришло " + got + " из " + state.queue.length +
       " источников" + (state.plan && state.plan.layoutFixed ? " (раскладка исправлена: «" + esc(state.plan.layoutFixed) + "»)" : ""));
+    if (state.channel === "shuttle") parts.push(shuttleLine());
   } else if (lf){
     parts.push("основных карточек: <b>" + lf.main.length + "</b> · похожих: " + lf.similar.length +
       " · скрыто с причинами: " + lf.hidden.length);
@@ -749,6 +902,8 @@ function makeDebugHook(){
       ladderStep: state.ladderStep, stepOffered: state.stepOffered,
       lastFilter: state.lastFilter ? { main: state.lastFilter.main.length, similar: state.lastFilter.similar.length,
                                        hidden: state.lastFilter.hidden.length } : null,
+      channel: state.channel, channelWhy: state.channelWhy, userjs: state.userjs,
+      shuttle: state.shuttle ? { done: !!state.shuttle.done, lost: !!state.shuttle.lost, link: state.shuttle.link || "" } : null,
       autos: JSON.parse(JSON.stringify(state.autos)) };
   };
 }
@@ -890,6 +1045,106 @@ function maybeFinishOnArrival(){
   addLog("конвейер: источников=" + sc + ", searching=" + state.searching +
     ", страниц=" + state.pages.length);
   if (state.searching && sc >= 2) finishSearch();
+}
+
+// ---- выбор канала и «Шаттл» (шаг 8, этап 2) -------------------------------------
+// «Шаттл» возможен, когда очередь можно положить в sessionStorage вкладки
+// (копия уходит новой вкладке при открытии) и вкладку можно открыть скриптом.
+// На file:// хранилище страницы не того происхождения, что у сайта релея, — там окна.
+function shuttlePossible(){
+  if (!Sh || !Ch || location.protocol === "file:") return false;
+  return typeof window.open === "function" && Sh.storageOk();
+}
+// этап 3: проверка помощника на 127.0.0.1. Пока помощника нет — выключена
+// (channels.js: иначе браузер спросит разрешение на локальную сеть раньше времени)
+function probeHelper(cb){
+  if (!Ch || !Ch.HELPER.enabled){ cb(false); return; }
+  var done = false;
+  var end = function(ok){ if (done) return; done = true; cb(ok); };
+  try {
+    var ctl = new AbortController();
+    setTimeout(function(){ try { ctl.abort(); } catch(e){} end(false); }, Ch.HELPER.probeMs);
+    fetch(Ch.HELPER.base + "/ping", { mode: "cors", cache: "no-store", signal: ctl.signal })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ end(!!(j && j.fsHelper)); }, function(){ end(false); });
+  } catch(e){ end(false); }
+}
+function chooseChannel(){
+  if (!Ch){   // модуль каналов не загрузился — по-старому: мост или окна
+    state.channel = state.bridge.ready ? "extension" : "windows";
+    state.channelWhy = "модуль каналов не загрузился";
+    return state.channel;
+  }
+  var r = Ch.pick({
+    helperEnabled: Ch.HELPER.enabled, helperReady: state.helperReady,
+    extensionReady: state.bridge.ready,
+    shuttlePossible: shuttlePossible(),
+    pref: Ch.pref()
+  });
+  state.channel = r.channel; state.channelWhy = r.why;
+  return r.channel;
+}
+
+// открыть вкладку-шаттл с очередью ids (без аргумента — вся очередь поиска).
+// Возвращает "opened" (вкладка открыта), "link" (браузер не дал открыть вкладку
+// из кода — в строке статуса будет ссылка) или false (очередь недоступна).
+// Ссылку на вкладку держим только для «лучшего усилия» при сбросе: при COOP на
+// сайте источника открыватель видит вкладку уже «закрытой» — закрывается она сама.
+var SHUTTLE_COPY_MS = 2000;    // через столько снимаем свою копию очереди, чтобы её не получили другие вкладки
+function startShuttle(ids){
+  ids = (ids && ids.length) ? ids.slice() : state.queue.slice();
+  var entries = [];
+  ids.forEach(function(id){
+    var u = engineUrl(id);
+    if (u) entries.push({ id: id, url: u + (u.indexOf("?") >= 0 ? "&" : "?") + "fsx=1" });
+  });
+  var sh = Sh.pack({ sid: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                     q: state.query, entries: entries, at: Date.now() });
+  if (!sh || !Sh.save(sh)) return false;
+  var first = sh.entries[0].id, w = null;
+  try { w = window.open(sh.entries[0].url, "_blank"); } catch(e){}
+  state.shuttle = { sid: sh.sid, done: false, lost: false, ref: w || null };
+  ids.forEach(function(id){ state.autos[id] = { state: "wait" }; });
+  if (!w){
+    // блокер не дал открыть вкладку из кода: обычная ссылка с rel="opener" тоже
+    // передаёт вкладке копию sessionStorage — пусть пользователь нажмёт её сам
+    state.shuttle.link = sh.entries[0].url;
+    addLog("шаттл: браузер не открыл вкладку сам — предложил ссылку (" + engineName(first) + ")", "warn");
+    return "link";
+  }
+  // копия уже ушла вкладке при открытии; свою убираем, чтобы её не получили
+  // другие вкладки, открытые страницей позже (чипы, окно поиска)
+  setTimeout(function(){ if (state.shuttle && state.shuttle.sid === sh.sid) Sh.clear(); }, SHUTTLE_COPY_MS);
+  addLog("шаттл: открыл вкладку с очередью " + sh.entries.map(function(e){ return engineName(e.id); }).join(" → "));
+  return "opened";
+}
+// остановить шаттл текущего поиска (сброс, новый поиск): закрыть вкладку, если
+// браузер ещё даёт, и убрать свою копию очереди
+function stopShuttle(){
+  var s = state.shuttle;
+  state.shuttle = null;
+  if (Sh) Sh.clear();
+  if (s && s.ref){ try { if (!s.ref.closed) s.ref.close(); } catch(e){} }
+}
+// строка статуса для «Шаттла»: что делать и какие источники остались
+function shuttleLine(){
+  var s = state.shuttle;
+  var left = state.queue.filter(function(id){
+    return state.pastedIds.indexOf(id) < 0 && !(state.autos[id] && state.autos[id].state === "err");
+  });
+  if (s && s.lost) return "«Шаттл» потерял очередь — остальные источники открой кнопками в «технических деталях»";
+  if (s && s.done) return "«Шаттл» прошёл все источники";
+  var html = "«Шаттл» (одна вкладка):";
+  if (s && s.link && left.length){
+    html = "«Шаттл»: браузер не открыл вкладку сам — <a class='slink' href=\"" + esc(s.link) +
+           "\" target=\"_blank\" rel=\"opener\">открой её ссылкой</a>; затем";
+  }
+  if (left.length){
+    html += state.userjs ? " выдачи уйдут сами — осталось: "
+                         : " на каждой выдаче жми закладку <b>«📨 в фильтр товаров»</b> — осталось: ";
+    html += esc(left.map(engineName).join(", "));
+  }
+  return html;
 }
 
 // ---- окна поиска: открыть / принять / закрыть ---------------------------------
@@ -1418,6 +1673,8 @@ function startSearch(){
   state.query = q; state.finalized = false; state.searching = true;
   state.tabsOpened = false; state.passForced = false; state.stepOffered = null;
   state.lastFilter = null; state.note = "";
+  stopShuttle();        // шаттл прежнего поиска больше не нужен
+  state.helperReady = false;
 
   buildStages();
   ensureQuery(false);
@@ -1437,39 +1694,63 @@ function startSearch(){
     return offers;
   }, function(){ return []; });
 
-  if (state.bridge.ready){
-    // расширение: поисковики плана под капотом с куками пользователя, вкладки
-    // не нужны; площадки мост не фетчит — они остаются кнопками «вкладкой»
-    planSerpSources().forEach(function(id){ if (!bridgeTried[id]) bridgeFetchEngine(id); });
-    state.queue.forEach(function(id){
-      if (MARKET_IDS.indexOf(id) >= 0) state.autos[id] = { state: "err", msg: "площадка — только вкладкой", blocked: true };
-    });
-    courier("мост активен: поисковики идут под капотом с твоими куками, окна не открываются");
-    addLog("ищу «" + esc(q) + "»: поисковики под капотом (расширение), магазины напрямую");
-  } else {
-    // окна источников из плана каскадом (друг под другом), последним —
-    // окно-анимация: оно перекрывает всю стопку и показывает живой прогресс
-    var opened = 0, failed = [];
-    state.queue.forEach(function(id, i){
-      if (openSearchWindow(id, i)) opened++; else failed.push(engineName(id));
-    });
-    state.tabsOpened = opened > 0;
-    var workerOk = opened > 0 && openWorkerWindow(q);
-    if (!opened){
-      courier("браузер заблокировал окна поиска — разреши всплывающие окна для этого сайта (значок в адресной строке) и нажми «искать» ещё раз, либо открой источники кнопками в «технических деталях»");
-      addLog("окна заблокированы браузером", "warn");
-    } else {
-      courier("открыл <b>" + opened + "</b> окон: " + esc(state.queue.map(engineName).join(", ")) +
-        ". Со скриптом окна отчитываются сами и закрываются; без него — один клик по закладке «📨 в фильтр» в каждом" +
-        (failed.length ? ". Не открылись: " + esc(failed.join(", ")) + " — кнопки в «технических деталях»" : ""));
-      addLog("ищу «" + esc(q) + "» (" + (state.plan ? state.plan.intentRu : "без плана") + "): открыл " + opened +
-        " окон: " + state.queue.map(engineName).join(", ") + (workerOk ? " + окно поиска" : "") +
-        (failed.length ? "; не открылись: " + failed.join(", ") : ""));
+  // канал страница выбирает сама (шаг 8) и показывает его в строке статуса
+  probeHelper(function(helperOk){
+    state.helperReady = helperOk;
+    if (Ch && Ch.HELPER.enabled && !helperOk)
+      addLog("помощник не ответил (" + Ch.HELPER.base + "). " + Ch.LOCAL_NET_HINT, "warn");
+    var channel = chooseChannel();
+    if (channel === "helper"){
+      // этап 3 (помощник) ещё не собран: канал выбирается только при
+      // HELPER.enabled — ветка ждёт его реализации
+      addLog("помощник найден, но этап 3 ещё не собран — ищу «Шаттлом»", "warn");
+      channel = state.channel = shuttlePossible() ? "shuttle" : "windows";
     }
-    var bo = $("bridgeOff");
-    if (bo) bo.hidden = false;
-  }
-  renderStatus();
+    addLog("канал сбора: " + (Ch ? Ch.label(channel) : channel) + " — " + state.channelWhy);
+    renderChannel();
+
+    if (channel === "extension"){
+      // расширение: поисковики плана под капотом с куками пользователя, вкладки
+      // не нужны; площадки мост не фетчит — они остаются кнопками «вкладкой»
+      planSerpSources().forEach(function(id){ if (!bridgeTried[id]) bridgeFetchEngine(id); });
+      state.queue.forEach(function(id){
+        if (MARKET_IDS.indexOf(id) >= 0) state.autos[id] = { state: "err", msg: "площадка — только вкладкой", blocked: true };
+      });
+      courier("мост активен: поисковики идут под капотом с твоими куками, окна не открываются");
+      addLog("ищу «" + esc(q) + "»: поисковики под капотом (расширение), магазины напрямую");
+    } else if (channel === "shuttle" && startShuttle() !== false){
+      // «Шаттл»: одна вкладка идёт по очереди источников (подсказка — в строке статуса)
+      state.tabsOpened = true;
+      addLog("ищу «" + esc(q) + "» (" + (state.plan ? state.plan.intentRu : "без плана") + "): канал «Шаттл», закладка нужна на каждой выдаче");
+      var boS = $("bridgeOff");
+      if (boS) boS.hidden = false;
+    } else {
+      state.channel = "windows";
+      // окна источников из плана каскадом (друг под другом), последним —
+      // окно-анимация: оно перекрывает всю стопку и показывает живой прогресс
+      var opened = 0, failed = [];
+      state.queue.forEach(function(id, i){
+        if (openSearchWindow(id, i)) opened++; else failed.push(engineName(id));
+      });
+      state.tabsOpened = opened > 0;
+      var workerOk = opened > 0 && openWorkerWindow(q);
+      if (!opened){
+        courier("браузер заблокировал окна поиска — разреши всплывающие окна для этого сайта (значок в адресной строке) и нажми «искать» ещё раз, либо открой источники кнопками в «технических деталях»");
+        addLog("окна заблокированы браузером", "warn");
+      } else {
+        courier("открыл <b>" + opened + "</b> окон: " + esc(state.queue.map(engineName).join(", ")) +
+          ". Со скриптом окна отчитываются сами и закрываются; без него — один клик по закладке «📨 в фильтр» в каждом" +
+          (failed.length ? ". Не открылись: " + esc(failed.join(", ")) + " — кнопки в «технических деталях»" : ""));
+        addLog("ищу «" + esc(q) + "» (" + (state.plan ? state.plan.intentRu : "без плана") + "): открыл " + opened +
+          " окон: " + state.queue.map(engineName).join(", ") + (workerOk ? " + окно поиска" : "") +
+          (failed.length ? "; не открылись: " + failed.join(", ") : ""));
+      }
+      var bo = $("bridgeOff");
+      if (bo) bo.hidden = false;
+    }
+    renderChips();
+    renderStatus();
+  });
 }
 
 function finishSearch(){
@@ -1483,8 +1764,14 @@ function finishSearch(){
   // страницы; свою вкладку выдвигаем на передний план
   try { if (relayChannel) relayChannel.postMessage({ fsWorkerDone: 1, srcs: srcs, query: state.query }); } catch(e){}
   closeOurWindows();
+  // копия очереди в ЭТОЙ вкладке (оставалась для запасной ссылки) больше не
+  // нужна: иначе её получили бы окна, открытые позже по кнопкам источников
+  if (Sh) Sh.clear();
   try { window.focus(); } catch(e){}
-  courier("итог собран из " + srcs + " поисковика(ов); поздние окна пересчитают его сами. Цены с площадок — кнопки в «технических деталях»");
+  var late = (state.channel === "shuttle" && state.shuttle && !state.shuttle.done) ?
+    "шаттл ещё идёт по источникам — закладка на следующей выдаче довезёт остальное, итог пересчитается сам" :
+    "поздние окна пересчитают его сами";
+  courier("итог собран из " + srcs + " поисковика(ов); " + late + ". Цены с площадок — кнопки в «технических деталях»");
   addLog("итог собран: " + srcs + " источника(ов), ИИ-ответов: " + state.aiAnswers.length);
   renderChips();
   rerunFinal();
@@ -1554,6 +1841,14 @@ function openLadderStep(){
   addLog("лестница ослабления, " + line);
   detLine(6, "• лестница ослабления: " + esc(line));
   renderPlan();
+  var serp = planSerpSources();
+  if (state.channel === "shuttle" && serp.length && startShuttle(serp)){
+    // «Шаттл»: новая вкладка с очередью шага, остальное — как в начале поиска
+    addLog("лестница ослабления: шаттл шага — " + serp.map(engineName).join(" → "));
+    renderChips();
+    renderStatus();
+    return;
+  }
   var opened = 0, failed = [];
   planSerpSources().forEach(function(id, i){
     if (openSearchWindow(id, state.openedIds.length + i)) opened++; else failed.push(engineName(id));
@@ -1631,11 +1926,14 @@ function download(name, content, mime){
 function resetAll(){
   try { if (workerRef && !workerRef.closed) workerRef.close(); } catch(e){}
   workerRef = null;
+  stopShuttle();
   state = { query: "", translated: null, plan: null, ladderStep: 0, stepOffered: null,
             passForced: false, lastFilter: null, note: "",
             pages: [], aiAnswers: [], shopReports: [], shopOffers: [], shopsPromise: null,
             offers: [], usedFallback: false, searching: false, finalized: false,
             queue: [], pastedIds: [], openedIds: [], tabsOpened: false,
+            channel: "", channelWhy: "", helperReady: false, userjs: state.userjs, shuttle: null,
+            staleVersion: state.staleVersion || "",
             bridge: state.bridge, autos: {} };   // мост переживает сброс
   for (var k in bridgeTried) delete bridgeTried[k];
   $("q").value = "";
@@ -1650,6 +1948,7 @@ function resetAll(){
   var tech = $("tech"); if (tech) tech.open = false;
   var bo = $("bridgeOff");
   if (bo && !state.bridge.ready) bo.hidden = false;
+  renderChannel();
   courier("");
   updatePasteHint();
 }
@@ -1735,14 +2034,68 @@ $("q").addEventListener("input", function(){
   suggestTimer = setTimeout(runSuggest, 450);
 });
 $("q").addEventListener("blur", function(){ setTimeout(function(){ $("sugg").hidden = true; }, 200); });
+
+// ---- канал сбора: показ выбранного и запасной селектор ------------------------
+function renderChannel(){
+  var now = $("channelNow"), sel = $("channel");
+  if (now) now.textContent = state.channel ? "— сейчас: " + (Ch ? Ch.label(state.channel) : state.channel) : "";
+  if (sel && Ch) sel.value = Ch.pref();
+}
+(function(){
+  var sel = $("channel");
+  if (!sel || !Ch) return;
+  sel.addEventListener("change", function(){
+    var v = Ch.setPref(sel.value);
+    addLog("канал сбора: запасной выбор — " + (v === "auto" ? "авто" : Ch.label(v)) + " (с ближайшего поиска)");
+  });
+})();
+
+// ---- устаревшая вкладка ---------------------------------------------------------
+// Сайт обновляется из main, а открытая вкладка живёт по старому коду. Раз в час
+// тихо сверяем version.json (тот же origin, без кэша) с меткой страницы; если
+// вышла другая версия — заметка в заголовке панели и в журнале, поиск не трогаем.
+var VERSION_CHECK_MS = 60 * 60 * 1000;
+function checkPageVersion(){
+  if (location.protocol !== "https:" && location.protocol !== "http:") return;
+  var h = document.documentElement;
+  if (h.classList.contains("relay-mode") || h.classList.contains("worker-mode")) return;
+  var mine = appVersion();
+  if (!mine) return;
+  try {
+    fetch("version.json?t=" + Date.now(), { cache: "no-store" })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){
+        var v = j && j.version ? String(j.version) : "";
+        if (!v || v === mine || v === state.staleVersion) return;
+        state.staleVersion = v;
+        addLog("на сайте версия " + esc(v) + ", эта вкладка открыта на " + esc(mine) +
+          " — обновите страницу (F5) перед новым поиском: закладка и каналы могли измениться", "warn");
+        updatePanelSummary();
+      }, function(){});
+  } catch(e){}
+}
+
+// экран релея остаётся только у адреса-релея: вкладка шаттла после обновления
+// или главная страница с запасной ссылкой не должны остаться пустыми
+(function(){
+  var h = document.documentElement;
+  if (!h.classList.contains("relay-mode")) return;
+  if (/(?:^|&)[?]?fsRelay=/.test(location.hash.slice(1))) return;
+  h.classList.remove("relay-mode");
+  if (Sh && Sh.load()) addLog("в этой вкладке осталась очередь шаттла — она продолжится со следующего нажатия закладки");
+})();
+
 renderControl();
 renderDialectMarks();
 renderDialectLinks();
+renderChannel();
 renderStatus();   // на первом визите — единственная подсказка: как передать выдачу
 // номер версии из метки (проставляет сборщик из version.json) — в заголовке панели
 (function(){ var tv = $("techVer"), v = appVersion(); if (tv && v) tv.textContent = "v" + v + " "; })();
 window.__fsDebug = makeDebugHook();   // отладочный хук доступен и до первой выдачи
 updatePasteHint();
+checkPageVersion();
+setInterval(checkPageVersion, VERSION_CHECK_MS);
 
 function updatePasteHint(){
   var n = state.pages.filter(function(p){ return p.via !== "auto"; }).length;
