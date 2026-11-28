@@ -543,9 +543,17 @@ function hostOf(u){
   var m = /^https?:\/\/([^\/"']+)/.exec(String(u || ""));
   return m ? m[1].replace(/^www\./, "") : "";
 }
+// ключ совпадения — сам адрес (без схемы, «www.», решётки и слэша в конце):
+// «подтверждено двумя источниками» — это одна и та же ссылка, найденная дважды.
+// Прежний ключ «домен + два первых слова названия» склеивал разные товары
+// одного магазина («Велосипед SAVA A7L …» и «Велосипед SAVA DECK 300» на Ozon),
+// и чужая модель молча исчезала ещё до оценки. Один товар по разным адресам
+// склеивается позже — в карточку итога (renderResults)
 function keyOf(hit){
-  var words = FC.significantTerms(hit.title).slice(0, 2).join(" ");
-  return hostOf(hit.url) + "|" + words;
+  var raw = String(hit.url || "").trim();
+  var m = /^[a-z][a-z0-9+.-]*:\/\/([^\/\s#]+)([^\s#]*)/i.exec(raw);
+  var u = m ? (m[1].toLowerCase().replace(/^www\./, "") + m[2].replace(/\/+$/, "")) : raw.toLowerCase();
+  return u || (hostOf(raw) + "|" + FC.significantTerms(hit.title).slice(0, 3).join(" "));
 }
 function compareHits(hits, query){
   var terms = FC.significantTerms(query);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Честный фильтр выдачи — скрипт-мост (Firefox/Chrome, тихий)
 // @namespace    fs-bridge
-// @version      2.4
+// @version      3.0.0
 // @description  Авто-режим ТОЛЬКО для окон, открытых сайтом агрегатора (маркер &fsx=1 в адресе или наш referrer): окно парсит выдачу (включая ИИ-ответ: Google AI Overview, Яндекс Нейро, Bing Copilot, Brave AI и цены маркетплейсов), отправляет агрегатору и закрывается само. Твои обычные поиски из адресной строки скрипт НЕ трогает — на чужих вкладках лишь маленькая кнопка «📨 в фильтр» и Alt+S для добровольной отправки. Расширение не нужно.
 // @author       filter-search
 // @match        https://www.google.com/search*
@@ -21,8 +21,8 @@
 // @run-at       document-idle
 // @noframes
 // @grant        none
-// @require      https://judgedikirsanov-dotcom.github.io/you.market/bridge-lib.js?v=9
-// @require      https://judgedikirsanov-dotcom.github.io/you.market/core.js?v=9
+// @require      https://judgedikirsanov-dotcom.github.io/you.market/bridge-lib.js?v=3.0.0
+// @require      https://judgedikirsanov-dotcom.github.io/you.market/core.js?v=3.0.0
 // ==/UserScript==
 //
 // Установка/ОБНОВЛЕНИЕ: Violentmonkey (Firefox) или Tampermonkey (Chrome) →

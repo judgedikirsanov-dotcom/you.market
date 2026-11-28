@@ -302,17 +302,65 @@ function detectSrcFromHost(host){
     if (SRC_HOSTS[i][0].test(String(host || ""))) return SRC_HOSTS[i][1];
   return null;
 }
+// v9: запрос узнаётся в любом регистре параметра (AliExpress ?SearchText=…),
+// item'ы выдачи получают картинку результата (img) — ec-карточка рисует её
+// слева; потерялась — плейсхолдер с первой буквой.
 function detectQueryFromSearch(search){
+  var KEYS = ["q", "text", "query", "searchtext", "k"];
   try {
     var sp = new URLSearchParams(String(search || ""));
-    return sp.get("q") || sp.get("text") || sp.get("query") || "";
+    var hit = null;
+    sp.forEach(function(v, key){
+      var lk = String(key).toLowerCase();
+      if (!hit && KEYS.indexOf(lk) >= 0 && v) hit = v;
+    });
+    return hit || "";
   } catch(e){ return ""; }
+}
+// словарь «URL результата → картинка» одним проходом по <a>: картинка живёт
+// в самой ссылке (маркетплейсы) или в соседнем контейнере (поисковики).
+// Псевдо-иконки (data:svg, favicon, logo, sprite) выбрасываем.
+function extractImages(doc){
+  var map = {};
+  try {
+    var list = doc.querySelectorAll("a[href]");
+    for (var i = 0; i < list.length && Object.keys(map).length < 80; i++){
+      var a = list[i], img = a.querySelector("img");
+      if (!img){
+        var p = a.parentElement;
+        if (p) img = p.querySelector("img");
+      }
+      if (!img) continue;
+      var u = img.currentSrc || img.getAttribute("src") || img.getAttribute("data-src") || "";
+      if (!u){
+        var ss = img.getAttribute("srcset") || "";
+        u = ss.split(",")[0].split(/\s+/)[0] || "";
+      }
+      if (!u || /^data:image\/svg/.test(u) || /favicon|logo|sprite|\/icons?\//i.test(u)) continue;
+      if (!/^https?:/.test(u)) u = (new URL(u, doc.baseURI)).href;
+      var keys = [a.href, a.href.split("?")[0]];
+      try { keys.push(decodeURIComponent(a.href)); } catch(e){}
+      keys.forEach(function(k){ if (k && !map[k]) map[k] = u; });
+    }
+  } catch(e){}
+  return map;
 }
 function collect(){
   var src = detectSrcFromHost(location.host);
   var q = detectQueryFromSearch(location.search);
   var html = document.documentElement.outerHTML;
   var items = src ? parseBySrc(src, html, document) : [];
+  if (items.length && document.querySelectorAll("img").length){
+    var imgs = extractImages(document);
+    items.forEach(function(it){
+      if (it.img) return;
+      var keys = [it.url, String(it.url || "").split("?")[0]];
+      try { keys.push(decodeURIComponent(it.url)); } catch(e){}
+      for (var j = 0; j < keys.length; j++){
+        if (keys[j] && imgs[keys[j]]){ it.img = imgs[keys[j]]; break; }
+      }
+    });
+  }
   var ai = src ? extractAi(src, html, document) : null;
   return { src: src, q: q, items: items, ai: ai, html: html };
 }

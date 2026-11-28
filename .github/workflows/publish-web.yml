@@ -16,13 +16,16 @@ jobs:
         with:
           node-version: 24
       - run: node apps/web/tests/web_tests.js
+      - run: node apps/web/tests/planner_tests.js
       - run: node tools/test_bridge_lib.js
-      - run: node tools/build_bookmarklet.js
+      - run: node tools/build_bookmarklet.js --check
+      - run: node tools/check_versions.js
       - name: Собрать папку сайта
         run: |
           mkdir -p dist/filter-search-ext
-          cp apps/web/index.html apps/web/core.js apps/web/filter-core.js apps/web/app.js \
-             apps/web/bridge-lib.js apps/web/filter-search.user.js dist/
+          cp apps/web/index.html apps/web/core.js apps/web/filter-core.js apps/web/planner.js \
+             apps/web/app.js apps/web/bridge-lib.js apps/web/filter-search.user.js dist/
+          cp version.json dist/
           cp apps/ext/* dist/filter-search-ext/
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5

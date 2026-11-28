@@ -199,7 +199,10 @@ function filterOffers(offers, query, opts){
 var FilterCore = { filterOffers: filterOffers, checkOffer: checkOffer,
                    significantTerms: significantTerms, isStrictToken: isStrictToken,
                    median: median, normText: normText, translateQuery: translateQuery,
-                   STOP: STOP, JUNK: JUNK, REFLAG: REFLAG, ACCESSORY: ACCESSORY };
+                   applyPriceFilter: applyPriceFilter,
+                   STOP: STOP, JUNK: JUNK, REFLAG: REFLAG, ACCESSORY: ACCESSORY,
+                   LEXICON: LEXICON };   // LEXICON — общий словарь для planner.js;
+                                          // applyPriceFilter —app.js зовёт его отдельно (оценка карточек — в planner.js)
 
 if (typeof module !== "undefined" && module.exports) module.exports = FilterCore;
 else root.FilterCore = FilterCore;

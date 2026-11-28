@@ -107,6 +107,16 @@ console.log("== сравнение выдач и подтверждения ==")
   ok(conf.length >= 1, "пересечение подтверждено двумя источниками: " + conf.length);
   ok(cmp.candidates[0].confirmedBy >= cmp.candidates[cmp.candidates.length - 1].confirmedBy,
      "сортировка: подтверждённые сверху");
+  // ключ совпадения — адрес, а не «домен + два слова»: разные товары одного
+  // магазина не склеиваются (иначе чужая модель исчезала до оценки)
+  var same = FS.compareHits([
+    { engine: "ozon", title: "Велосипед SAVA A7L Carbon Road Bike 27.5", url: "https://www.ozon.ru/product/1/" },
+    { engine: "ozon", title: "Велосипед SAVA DECK 300", url: "https://www.ozon.ru/product/4" },
+    { engine: "yandex", title: "Велосипед SAVA A7L Carbon Road Bike 27.5", url: "HTTP://WWW.OZON.ru/product/1#top" }
+  ], "sava a7l carbon");
+  ok(same.candidates.length === 2, "разные адреса одного магазина — разные кандидаты: " + same.candidates.length);
+  ok(same.candidates.some(function(c){ return c.confirmedBy === 2 && c.engines.indexOf("yandex") >= 0; }),
+     "тот же адрес из двух источников — подтверждён");
 })();
 
 console.log("== фильтр и медиана (ядро v4 без изменений) ==");
